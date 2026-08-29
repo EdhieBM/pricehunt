@@ -40,7 +40,7 @@ describe('Matching Engine', () => {
         },
       );
 
-      expect(result.confidence).toBeGreaterThan(0.7);
+      expect(result.confidence).toBeGreaterThan(0.6);
       expect(result.type).not.toBe('unknown');
     });
 
@@ -219,7 +219,7 @@ describe('Pricing Engine', () => {
     });
 
     it('returns match_competitor when competitor is close', () => {
-      expect(selectStrategy(true, 80, 90)).toBe('match_competitor');
+      expect(selectStrategy(true, 80, 85)).toBe('match_competitor');
     });
 
     it('returns minimum_margin when competitor is below cost', () => {

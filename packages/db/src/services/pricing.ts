@@ -160,7 +160,7 @@ export function selectStrategy(
     return 'minimum_margin';
   }
 
-  if (competitorPrice > ourCost * 1.05) {
+  if (competitorPrice > ourCost * 1.10) {
     return 'competitor_minus_1';
   }
 
