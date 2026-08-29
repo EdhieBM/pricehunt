@@ -1,0 +1,128 @@
+export type SupplierSlug = 'aliexpress' | 'amazon' | 'mercadolibre';
+
+interface ParsedUrl {
+  supplier: SupplierSlug;
+  productId: string;
+  originalUrl: string;
+}
+
+const SUPPLIER_PATTERNS: {
+  supplier: SupplierSlug;
+  domains: RegExp[];
+  extractProductId: (url: string, match: RegExpMatchArray) => string | null;
+}[] = [
+  {
+    supplier: 'aliexpress',
+    domains: [
+      /^https?:\/\/(?:www\.)?aliexpress\.com\/item\/(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?aliexpress\.us\/item\/(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?aliexpress\.com\/.*\/item\/(\d+)\.html/,
+      /^https?:\/\/a\.aliexpress\.com\/.+/,
+    ],
+    extractProductId: (url: string, match: RegExpMatchArray): string | null => {
+      if (match[1]) return match[1];
+      const itemMatch = url.match(/\/item\/(\d+)/);
+      return itemMatch?.[1] ?? null;
+    },
+  },
+  {
+    supplier: 'amazon',
+    domains: [
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*\/dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/.*\/dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*\/gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/.*\/gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/amzn\.to\/.+/,
+    ],
+    extractProductId: (url: string, match: RegExpMatchArray): string | null => {
+      if (match[1]) return match[1];
+      const dpMatch = url.match(/\/dp\/([A-Z0-9]{10})/);
+      if (dpMatch) return dpMatch[1] ?? null;
+      const gpMatch = url.match(/\/gp\/product\/([A-Z0-9]{10})/);
+      return gpMatch?.[1] ?? null;
+    },
+  },
+  {
+    supplier: 'mercadolibre',
+    domains: [
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.mx\/.*\/(MLM-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.ar\/.*\/(MLA-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.br\/.*\/(MLB-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.co\/.*\/(MCO-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.cl\/.*\/(MLC-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.pe\/.*\/(MPE-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.uy\/.*\/(MLU-\d+)/,
+      /^https?:\/\/articulo\.mercadolibre\.com\.mx\/(MLM-\d+)/,
+      /^https?:\/\/produto\.mercadolibre\.com\.br\/(MLB-\d+)/,
+    ],
+    extractProductId: (_url, match) => match[1] || null,
+  },
+];
+
+const SUPPLIER_DOMAIN_MAP: Record<string, SupplierSlug> = {
+  'aliexpress.com': 'aliexpress',
+  'aliexpress.us': 'aliexpress',
+  'a.aliexpress.com': 'aliexpress',
+  'amazon.com': 'amazon',
+  'amazon.com.mx': 'amazon',
+  'amzn.to': 'amazon',
+  'mercadolibre.com.mx': 'mercadolibre',
+  'mercadolibre.com.ar': 'mercadolibre',
+  'mercadolibre.com.br': 'mercadolibre',
+  'mercadolibre.com.co': 'mercadolibre',
+  'mercadolibre.com.cl': 'mercadolibre',
+  'mercadolibre.com.pe': 'mercadolibre',
+  'mercadolibre.com.uy': 'mercadolibre',
+  'articulo.mercadolibre.com.mx': 'mercadolibre',
+  'produto.mercadolibre.com.br': 'mercadolibre',
+};
+
+export function detectSupplierFromUrl(url: string): SupplierSlug | null {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    return SUPPLIER_DOMAIN_MAP[hostname] || null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseProductUrl(url: string): ParsedUrl | null {
+  const cleaned = url.trim();
+
+  for (const pattern of SUPPLIER_PATTERNS) {
+    for (const domainPattern of pattern.domains) {
+      const match = cleaned.match(domainPattern);
+      if (match) {
+        const productId = pattern.extractProductId(cleaned, match);
+        if (productId) {
+          return {
+            supplier: pattern.supplier,
+            productId,
+            originalUrl: cleaned,
+          };
+        }
+      }
+    }
+  }
+
+  const supplier = detectSupplierFromUrl(cleaned);
+  if (supplier) {
+    return { supplier, productId: '', originalUrl: cleaned };
+  }
+
+  return null;
+}
+
+export function isSupportedSupplierUrl(url: string): boolean {
+  return parseProductUrl(url) !== null;
+}
+
+export function getSupplierName(supplier: SupplierSlug): string {
+  const names: Record<SupplierSlug, string> = {
+    aliexpress: 'AliExpress',
+    amazon: 'Amazon',
+    mercadolibre: 'Mercado Libre',
+  };
+  return names[supplier];
+}

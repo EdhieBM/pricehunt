@@ -9,6 +9,9 @@ import { productRoutes } from './routes/products';
 import { searchRoutes } from './routes/search';
 import { checkoutRoutes } from './routes/checkout';
 import { orderRoutes } from './routes/orders';
+import { productIngestionRoutes } from './routes/ingestion';
+import { matchingRoutes } from './routes/matching';
+import { pricingRoutes } from './routes/pricing';
 
 const server = Fastify({
   logger: {
@@ -40,6 +43,9 @@ async function bootstrap() {
   await server.register(searchRoutes, { prefix: '/api/v1/search' });
   await server.register(checkoutRoutes, { prefix: '/api/v1/checkout' });
   await server.register(orderRoutes, { prefix: '/api/v1/orders' });
+  await server.register(productIngestionRoutes, { prefix: '/api/v1/products' });
+  await server.register(matchingRoutes, { prefix: '/api/v1/matching' });
+  await server.register(pricingRoutes, { prefix: '/api/v1/pricing' });
 
   // Start
   try {

@@ -1,3 +1,9 @@
 export { drizzle } from 'drizzle-orm/postgres-js';
 export { db } from './client';
 export * from './schema';
+export * from './services/matching';
+export * from './services/pricing';
+export * from './services/ingestion';
+export * from './services/supplier';
+export { MercadoLibreAdapter } from './services/supplier/mercadolibre';
+export { AliExpressAdapter } from './services/supplier/aliexpress';
