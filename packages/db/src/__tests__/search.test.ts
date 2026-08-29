@@ -26,10 +26,14 @@ vi.mock('meilisearch', () => {
     deleteDocument: vi.fn().mockResolvedValue(undefined),
   };
 
+  class MockMeiliSearch {
+    index() {
+      return mockIndex;
+    }
+  }
+
   return {
-    MeiliSearch: vi.fn().mockImplementation(() => ({
-      index: vi.fn().mockReturnValue(mockIndex),
-    })),
+    MeiliSearch: MockMeiliSearch,
   };
 });
 
