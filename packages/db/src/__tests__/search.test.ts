@@ -40,7 +40,7 @@ import {
   searchProducts,
   removeProduct,
   type MeiliProduct,
-} from '../search';
+} from '../services/search';
 
 const mockProduct: MeiliProduct = {
   id: 'sp-1',
