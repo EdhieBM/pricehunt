@@ -16,7 +16,7 @@ const SUPPLIER_PATTERNS: {
     domains: [
       /^https?:\/\/(?:www\.)?aliexpress\.com\/item\/(\d+)\.html/,
       /^https?:\/\/(?:www\.)?aliexpress\.us\/item\/(\d+)\.html/,
-      /^https?:\/\/(?:www\.)?aliexpress\.com\/.*\/item\/(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?aliexpress\.com\/.*?\/item\/(\d+)\.html/,
       /^https?:\/\/a\.aliexpress\.com\/.+/,
     ],
     extractProductId: (url: string, match: RegExpMatchArray): string | null => {
@@ -28,10 +28,10 @@ const SUPPLIER_PATTERNS: {
   {
     supplier: 'amazon',
     domains: [
-      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*\/dp\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\/.*\/dp\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*\/gp\/product\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\/.*\/gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*?\/dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/.*?\/dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*?\/gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/.*?\/gp\/product\/([A-Z0-9]{10})/,
       /^https?:\/\/amzn\.to\/.+/,
     ],
     extractProductId: (url: string, match: RegExpMatchArray): string | null => {
@@ -45,17 +45,22 @@ const SUPPLIER_PATTERNS: {
   {
     supplier: 'mercadolibre',
     domains: [
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.mx\/.*\/(MLM-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.ar\/.*\/(MLA-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.br\/.*\/(MLB-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.co\/.*\/(MCO-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.cl\/.*\/(MLC-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.pe\/.*\/(MPE-\d+)/,
-      /^https?:\/\/(?:www\.)?mercadolibre\.com\.uy\/.*\/(MLU-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.mx\/.*?\/(MLM-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.mx\/.*?\/p\/(MLM\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.ar\/.*?\/(MLA-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.ar\/.*?\/p\/(MLA\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.br\/.*?\/(MLB-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.br\/.*?\/p\/(MLB\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.co\/.*?\/(MCO-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.cl\/.*?\/(MLC-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.pe\/.*?\/(MPE-\d+)/,
+      /^https?:\/\/(?:www\.)?mercadolibre\.com\.uy\/.*?\/(MLU-\d+)/,
       /^https?:\/\/articulo\.mercadolibre\.com\.mx\/(MLM-\d+)/,
       /^https?:\/\/produto\.mercadolibre\.com\.br\/(MLB-\d+)/,
     ],
-    extractProductId: (_url, match) => match[1] || null,
+    extractProductId: (_url: string, match: RegExpMatchArray): string | null => {
+      return match[1] || null;
+    },
   },
 ];
 
