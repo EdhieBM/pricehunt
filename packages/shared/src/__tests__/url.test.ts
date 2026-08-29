@@ -4,7 +4,7 @@ import {
   detectSupplierFromUrl,
   isSupportedSupplierUrl,
   getSupplierName,
-} from '../url';
+} from '../utils/url';
 
 describe('parseProductUrl', () => {
   describe('AliExpress', () => {
