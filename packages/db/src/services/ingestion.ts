@@ -153,16 +153,33 @@ async function getOrCreateSupplier(
     return existing[0];
   }
 
-  const names: Record<SupplierSlug, string> = {
+  const names: Record<string, string> = {
     aliexpress: 'AliExpress',
     amazon: 'Amazon',
     mercadolibre: 'Mercado Libre',
+    ebay: 'eBay',
+    walmart: 'Walmart',
+    shein: 'SHEIN',
+    temu: 'Temu',
+    costco: 'Costco',
+    liverpool: 'Liverpool',
+    palacio: 'Palacio de Hierro',
+    tiktokshop: 'TikTok Shop',
+    facebook: 'Facebook Marketplace',
+    rappi: 'Rappi',
+    didi: 'DiDi Store',
+    shopify: 'Shopify Stores',
+    homedepot: 'Home Depot',
+    officedepot: 'Office Depot',
+    sears: 'Sears',
+    coppel: 'Coppel',
+    sanborns: 'Sanborns',
   };
 
   const [created] = await db
     .insert(suppliers)
     .values({
-      name: names[slug],
+      name: names[slug] || slug,
       slug,
       type: 'api',
     })

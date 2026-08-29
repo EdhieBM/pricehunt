@@ -1,4 +1,24 @@
-export type SupplierSlug = 'aliexpress' | 'amazon' | 'mercadolibre';
+export type SupplierSlug =
+  | 'aliexpress'
+  | 'amazon'
+  | 'mercadolibre'
+  | 'ebay'
+  | 'walmart'
+  | 'shein'
+  | 'temu'
+  | 'costco'
+  | 'liverpool'
+  | 'palacio'
+  | 'tiktokshop'
+  | 'facebook'
+  | 'rappi'
+  | 'didi'
+  | 'shopify'
+  | 'homedepot'
+  | 'officedepot'
+  | 'sears'
+  | 'coppel'
+  | 'sanborns';
 
 interface ParsedUrl {
   supplier: SupplierSlug;
@@ -63,6 +83,61 @@ const SUPPLIER_PATTERNS: {
       return match[1] || null;
     },
   },
+  {
+    supplier: 'ebay',
+    domains: [
+      /^https?:\/\/(?:www\.)?ebay\.com\.mx\/itm\/(\d+)/,
+      /^https?:\/\/(?:www\.)?ebay\.com\/itm\/(\d+)/,
+      /^https?:\/\/(?:www\.)?ebay\.ca\/itm\/(\d+)/,
+      /^https?:\/\/(?:www\.)?ebay\.co\.uk\/itm\/(\d+)/,
+    ],
+    extractProductId: (_url: string, match: RegExpMatchArray): string | null => {
+      return match[1] || null;
+    },
+  },
+  {
+    supplier: 'walmart',
+    domains: [
+      /^https?:\/\/(?:www\.)?walmart\.com\.mx\/ip\/([^/]+)/,
+      /^https?:\/\/(?:www\.)?walmart\.com\/ip\/([^/]+)/,
+    ],
+    extractProductId: (_url: string, match: RegExpMatchArray): string | null => {
+      return match[1] || null;
+    },
+  },
+  {
+    supplier: 'shein',
+    domains: [
+      /^https?:\/\/(?:www\.)?shein\.com\.mx\/.*?-p-(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?shein\.com\/.*?-p-(\d+)\.html/,
+    ],
+    extractProductId: (_url: string, match: RegExpMatchArray): string | null => {
+      return match[1] || null;
+    },
+  },
+  {
+    supplier: 'temu',
+    domains: [
+      /^https?:\/\/(?:www\.)?temu\.com\.mx\/.*?-goods-(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?temu\.com\/.*?-goods-(\d+)\.html/,
+    ],
+    extractProductId: (_url: string, match: RegExpMatchArray): string | null => {
+      return match[1] || null;
+    },
+  },
+  {
+    supplier: 'tiktokshop',
+    domains: [
+      /^https?:\/\/(?:www\.)?tiktok\.com\/@[^/]+\/video\/(\d+)/,
+      /^https?:\/\/(?:www\.)?tiktok\.com\/search\?.*q=/,
+      /^https?:\/\/vm\.tiktok\.com\/.+/,
+    ],
+    extractProductId: (url: string, match: RegExpMatchArray): string | null => {
+      if (match[1]) return match[1];
+      const idMatch = url.match(/\/video\/(\d+)/);
+      return idMatch?.[1] || null;
+    },
+  },
 ];
 
 const SUPPLIER_DOMAIN_MAP: Record<string, SupplierSlug> = {
@@ -81,6 +156,18 @@ const SUPPLIER_DOMAIN_MAP: Record<string, SupplierSlug> = {
   'mercadolibre.com.uy': 'mercadolibre',
   'articulo.mercadolibre.com.mx': 'mercadolibre',
   'produto.mercadolibre.com.br': 'mercadolibre',
+  'ebay.com': 'ebay',
+  'ebay.com.mx': 'ebay',
+  'ebay.ca': 'ebay',
+  'ebay.co.uk': 'ebay',
+  'walmart.com': 'walmart',
+  'walmart.com.mx': 'walmart',
+  'shein.com': 'shein',
+  'shein.com.mx': 'shein',
+  'temu.com': 'temu',
+  'temu.com.mx': 'temu',
+  'tiktok.com': 'tiktokshop',
+  'vm.tiktok.com': 'tiktokshop',
 };
 
 export function detectSupplierFromUrl(url: string): SupplierSlug | null {
@@ -129,6 +216,23 @@ export function getSupplierName(supplier: SupplierSlug): string {
     aliexpress: 'AliExpress',
     amazon: 'Amazon',
     mercadolibre: 'Mercado Libre',
+    ebay: 'eBay',
+    walmart: 'Walmart',
+    shein: 'SHEIN',
+    temu: 'Temu',
+    costco: 'Costco',
+    liverpool: 'Liverpool',
+    palacio: 'Palacio de Hierro',
+    tiktokshop: 'TikTok Shop',
+    facebook: 'Facebook Marketplace',
+    rappi: 'Rappi',
+    didi: 'DiDi Store',
+    shopify: 'Shopify Stores',
+    homedepot: 'Home Depot',
+    officedepot: 'Office Depot',
+    sears: 'Sears',
+    coppel: 'Coppel',
+    sanborns: 'Sanborns',
   };
   return names[supplier];
 }

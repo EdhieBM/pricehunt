@@ -100,7 +100,7 @@ describe('parseProductUrl', () => {
     });
 
     it('returns null for unsupported domain', () => {
-      expect(parseProductUrl('https://www.ebay.com/item/123')).toBeNull();
+      expect(parseProductUrl('https://www.bestbuy.com/item/123')).toBeNull();
     });
 
     it('returns null for empty string', () => {
@@ -122,9 +122,9 @@ describe('detectSupplierFromUrl', () => {
     expect(detectSupplierFromUrl('https://www.mercadolibre.com.mx/item/MLM-123')).toBe('mercadolibre');
   });
 
-  it('returns null for unknown domain', () => {
-    expect(detectSupplierFromUrl('https://www.ebay.com/item/123')).toBeNull();
-  });
+    it('returns null for unknown domain', () => {
+      expect(detectSupplierFromUrl('https://www.bestbuy.com/item/123')).toBeNull();
+    });
 });
 
 describe('isSupportedSupplierUrl', () => {
@@ -132,9 +132,9 @@ describe('isSupportedSupplierUrl', () => {
     expect(isSupportedSupplierUrl('https://www.aliexpress.com/item/123.html')).toBe(true);
   });
 
-  it('returns false for unsupported URL', () => {
-    expect(isSupportedSupplierUrl('https://www.ebay.com/item/123')).toBe(false);
-  });
+    it('returns false for unsupported URL', () => {
+      expect(isSupportedSupplierUrl('https://www.bestbuy.com/item/123')).toBe(false);
+    });
 });
 
 describe('getSupplierName', () => {

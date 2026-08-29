@@ -2,10 +2,16 @@ import type { SupplierAdapter } from '@pricehunt/shared';
 import type { SupplierSlug } from '@pricehunt/shared';
 import { MercadoLibreAdapter } from './mercadolibre';
 import { AliExpressAdapter } from './aliexpress';
+import { AmazonAdapter } from './amazon';
+import { EbayAdapter } from './ebay';
+import { WalmartAdapter } from './walmart';
+import { SheinAdapter } from './shein';
+import { TemuAdapter } from './temu';
+import { TikTokShopAdapter } from './tiktokshop';
 
 type AdapterFactory = (config?: Record<string, string>) => SupplierAdapter;
 
-const adapterFactories: Record<SupplierSlug, AdapterFactory> = {
+const adapterFactories: Record<string, AdapterFactory> = {
   mercadolibre: (config) =>
     new MercadoLibreAdapter({
       apiKey: config?.MERCADOLIBRE_API_KEY,
@@ -16,12 +22,29 @@ const adapterFactories: Record<SupplierSlug, AdapterFactory> = {
       apiKey: config?.ALIEXPRESS_API_KEY,
       rapidApiKey: config?.ALIEXPRESS_RAPIDAPI_KEY,
     }),
-  amazon: (_config) => {
-    throw new Error('Amazon adapter not yet implemented');
-  },
+  amazon: (config) =>
+    new AmazonAdapter({
+      accessKey: config?.AMAZON_ACCESS_KEY,
+      secretKey: config?.AMAZON_SECRET_KEY,
+      partnerTag: config?.AMAZON_PARTNER_TAG,
+    }),
+  ebay: (config) =>
+    new EbayAdapter({
+      appId: config?.EBAY_APP_ID,
+      certId: config?.EBAY_CERT_ID,
+      authToken: config?.EBAY_AUTH_TOKEN,
+    }),
+  walmart: (config) =>
+    new WalmartAdapter({
+      clientId: config?.WALMART_CLIENT_ID,
+      clientSecret: config?.WALMART_CLIENT_SECRET,
+    }),
+  shein: () => new SheinAdapter(),
+  temu: () => new TemuAdapter(),
+  tiktokshop: () => new TikTokShopAdapter(),
 };
 
-const adapterCache = new Map<SupplierSlug, SupplierAdapter>();
+const adapterCache = new Map<string, SupplierAdapter>();
 
 export function getSupplierAdapter(
   supplier: SupplierSlug,

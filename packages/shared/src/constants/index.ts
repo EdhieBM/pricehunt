@@ -43,4 +43,23 @@ export const SUPPLIER_TYPE_MAP: Record<string, string> = {
   aliexpress: 'AliExpress',
   amazon: 'Amazon',
   mercadolibre: 'Mercado Libre',
+  ebay: 'eBay',
+  walmart: 'Walmart',
+  shein: 'SHEIN',
+  temu: 'Temu',
+  costco: 'Costco',
+  liverpool: 'Liverpool',
+  palacio: 'Palacio de Hierro',
+  tiktokshop: 'TikTok Shop',
+  facebook: 'Facebook Marketplace',
+  rappi: 'Rappi',
+  didi: 'DiDi Store',
+  shopify: 'Shopify Stores',
+  homedepot: 'Home Depot',
+  officedepot: 'Office Depot',
+  sears: 'Sears',
+  coppel: 'Coppel',
+  sanborns: 'Sanborns',
 };
+
+export const SUPPLIER_SLUGS = Object.keys(SUPPLIER_TYPE_MAP) as [string, ...string[]];
