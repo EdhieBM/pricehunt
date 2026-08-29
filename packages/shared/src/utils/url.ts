@@ -17,21 +17,22 @@ const SUPPLIER_PATTERNS: {
       /^https?:\/\/(?:www\.)?aliexpress\.com\/item\/(\d+)\.html/,
       /^https?:\/\/(?:www\.)?aliexpress\.us\/item\/(\d+)\.html/,
       /^https?:\/\/(?:www\.)?aliexpress\.com\/.*?\/item\/(\d+)\.html/,
+      /^https?:\/\/(?:www\.)?aliexpress\.com\/.*?\/(\d+)\.html/,
       /^https?:\/\/a\.aliexpress\.com\/.+/,
     ],
     extractProductId: (url: string, match: RegExpMatchArray): string | null => {
       if (match[1]) return match[1];
-      const itemMatch = url.match(/\/item\/(\d+)/);
-      return itemMatch?.[1] ?? null;
+      const idMatch = url.match(/\/(\d{10,})\.html/);
+      return idMatch?.[1] ?? null;
     },
   },
   {
     supplier: 'amazon',
     domains: [
-      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*?\/dp\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\/.*?\/dp\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/.*?\/gp\/product\/([A-Z0-9]{10})/,
-      /^https?:\/\/(?:www\.)?amazon\.com\/.*?\/gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/(?:.*?\/)?dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/(?:.*?\/)?dp\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\.mx\/(?:.*?\/)?gp\/product\/([A-Z0-9]{10})/,
+      /^https?:\/\/(?:www\.)?amazon\.com\/(?:.*?\/)?gp\/product\/([A-Z0-9]{10})/,
       /^https?:\/\/amzn\.to\/.+/,
     ],
     extractProductId: (url: string, match: RegExpMatchArray): string | null => {
@@ -85,7 +86,7 @@ const SUPPLIER_DOMAIN_MAP: Record<string, SupplierSlug> = {
 export function detectSupplierFromUrl(url: string): SupplierSlug | null {
   try {
     const parsed = new URL(url);
-    const hostname = parsed.hostname.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
     return SUPPLIER_DOMAIN_MAP[hostname] || null;
   } catch {
     return null;
