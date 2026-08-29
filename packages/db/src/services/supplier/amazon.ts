@@ -229,8 +229,11 @@ export class AmazonAdapter implements SupplierAdapter {
     try {
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept-Language': 'es-MX,es;q=0.9',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate',
+          'Cache-Control': 'no-cache',
         },
       });
 
@@ -239,34 +242,77 @@ export class AmazonAdapter implements SupplierAdapter {
       const html = await response.text();
 
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      const title = titleMatch?.[1]?.replace(/ *:.*$/, '').trim() || asin;
+      const title = titleMatch?.[1]?.replace(/ *[-|].*$/i, '').replace(/ *:.*$/, '').trim() || asin;
 
-      // Try JSON-LD first (more reliable)
+      // Try JSON-LD first (most reliable)
       let price = 0;
-      const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g);
-      if (jsonLdMatch) {
-        for (const match of jsonLdMatch) {
-          const jsonStr = match.replace(/<script[^>]*>/, '').replace(/<\/script>/, '');
+      const jsonLdMatches = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi);
+      if (jsonLdMatches) {
+        for (const match of jsonLdMatches) {
+          const jsonStr = match.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '');
           try {
-            const data = JSON.parse(jsonStr) as { offers?: { price?: string } };
-            if (data.offers?.price) {
-              price = parseFloat(data.offers.price);
-              break;
+            const data = JSON.parse(jsonStr);
+            // Handle @graph array
+            const items = data['@graph'] || (Array.isArray(data) ? data : [data]);
+            for (const item of items) {
+              if (item?.offers?.price) {
+                price = parseFloat(item.offers.price);
+                break;
+              }
+              if (item?.offers?.lowPrice) {
+                price = parseFloat(item.offers.lowPrice);
+                break;
+              }
             }
+            if (price > 0) break;
           } catch { continue; }
         }
       }
-      // Fallback to regex
+
+      // Fallback: look for price in various Amazon-specific patterns
       if (price === 0) {
-        const priceMatch = html.match(/\$[\d,]+\.?\d*/);
-        price = priceMatch ? parseFloat(priceMatch[0].replace(/[$,]/g, '')) : 0;
+        const pricePatterns = [
+          /"priceAmount"\s*:\s*([\d,]+\.?\d*)/,
+          /"price"\s*:\s*"?([\d,]+\.?\d*)"?/,
+          /class="a-price-whole"[^>]*>([\d,]+)<\/span>.*?class="a-price-fraction"[^>]*>(\d+)/s,
+          /id="priceblock_ourprice"[^>]*>\$?([\d,]+\.?\d*)/,
+          /id="priceblock_dealprice"[^>]*>\$?([\d,]+\.?\d*)/,
+          /"a-price"[^>]*>.*?(\d[\d,]*\.?\d*)/,
+          /\$(\d[\d,]*\.?\d*)/,
+        ];
+
+        for (const pattern of pricePatterns) {
+          const match = html.match(pattern);
+          if (match?.[1]) {
+            const priceStr = match[1].replace(/,/g, '');
+            const parsed = parseFloat(priceStr);
+            if (parsed > 0 && parsed < 100000) {
+              price = parsed;
+              break;
+            }
+          }
+        }
       }
 
-      const imageMatches = html.match(/https:\/\/m\.media-amazon\.com\/images\/I\/[^"]+\.jpg/g);
+      const imageMatches = html.match(/https:\/\/m\.media-amazon\.com\/images\/I\/[^"]+\.(jpg|png|webp)/gi);
       const images = imageMatches ? [...new Set(imageMatches)].slice(0, 5) : [];
 
-      const brandMatch = html.match(/bylineInfo["']\s*content=["']([^"']+)["']/i);
-      const brand = brandMatch?.[1] || null;
+      // Try multiple brand patterns
+      let brand = null;
+      const brandPatterns = [
+        /bylineInfo["']\s*content=["']([^"']+)["']/i,
+        /class="po-brand"[^>]*>.*?<span[^>]*>([^<]+)</is,
+        /"brand"\s*:\s*"([^"]+)"/i,
+        /Marcas:\s*<[^>]*>([^<]+)/i,
+      ];
+      for (const pattern of brandPatterns) {
+        const match = html.match(pattern);
+        if (match?.[1]) {
+          brand = match[1].replace(/^Marca:\s*/i, '').trim();
+          if (brand && brand.length > 1 && brand.length < 100) break;
+          brand = null;
+        }
+      }
 
       return {
         title,
