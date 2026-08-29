@@ -84,80 +84,180 @@ export class AliExpressAdapter extends BaseSupplierAdapter {
       throw new Error(`Could not extract product ID from URL: ${input.url}`);
     }
 
-    const product = await this.fetchJson<AliExpressProductResponse>(
-      `/product/${productId}`,
-      { headers: this.getHeaders() },
-    );
+    // Try API first, fall back to scraping
+    if (this.rapidApiKey || this.apiKey) {
+      try {
+        const product = await this.fetchJson<AliExpressProductResponse>(
+          `/product/${productId}`,
+          { headers: this.getHeaders() },
+        );
 
-    return {
-      supplierProductId: product.product_id,
-      title: product.product_title,
-      description: product.product_description ?? null,
-      images: [product.product_main_image_url, ...product.product_images],
-      price: parseFloat(product.sale_price),
-      currency: product.currency || 'USD',
-      inStock: parseInt(product.stock) > 0,
-      attributes: product.product_attributes || {},
-    };
+        return {
+          supplierProductId: product.product_id,
+          title: product.product_title,
+          description: product.product_description ?? null,
+          images: [product.product_main_image_url, ...product.product_images],
+          price: parseFloat(product.sale_price),
+          currency: product.currency || 'USD',
+          inStock: parseInt(product.stock) > 0,
+          attributes: product.product_attributes || {},
+        };
+      } catch {
+        // Fall through to scraping
+      }
+    }
+
+    return this.scrapeProduct(input.url, productId);
   }
 
   async search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
-    const params = new URLSearchParams({
-      q: query,
-      limit: String(options?.limit || 10),
-      offset: String(options?.offset || 0),
-    });
+    if (this.rapidApiKey || this.apiKey) {
+      try {
+        const params = new URLSearchParams({
+          q: query,
+          limit: String(options?.limit || 10),
+          offset: String(options?.offset || 0),
+        });
 
-    const response = await this.fetchJson<AliExpressSearchResponse>(
-      `/search?${params}`,
-      { headers: this.getHeaders() },
-    );
+        const response = await this.fetchJson<AliExpressSearchResponse>(
+          `/search?${params}`,
+          { headers: this.getHeaders() },
+        );
 
-    return response.products.map((product) => ({
-      supplierProductId: product.product_id,
-      title: product.product_title,
-      imageUrl: product.product_main_image_url,
-      price: parseFloat(product.sale_price),
-      currency: product.currency || 'USD',
-      inStock: parseInt(product.stock) > 0,
-    }));
+        return response.products.map((product) => ({
+          supplierProductId: product.product_id,
+          title: product.product_title,
+          imageUrl: product.product_main_image_url,
+          price: parseFloat(product.sale_price),
+          currency: product.currency || 'USD',
+          inStock: parseInt(product.stock) > 0,
+        }));
+      } catch {
+        // Fall through
+      }
+    }
+
+    return [];
   }
 
   async getProduct(supplierProductId: string): Promise<ProductData> {
-    const product = await this.fetchJson<AliExpressProductResponse>(
-      `/product/${supplierProductId}`,
-      { headers: this.getHeaders() },
-    );
+    if (this.rapidApiKey || this.apiKey) {
+      try {
+        const product = await this.fetchJson<AliExpressProductResponse>(
+          `/product/${supplierProductId}`,
+          { headers: this.getHeaders() },
+        );
+
+        return {
+          supplierProductId: product.product_id,
+          title: product.product_title,
+          description: product.product_description ?? null,
+          images: [product.product_main_image_url, ...product.product_images],
+          attributes: product.product_attributes || {},
+          brand: product.product_attributes?.brand || null,
+          mpn: product.product_attributes?.mpn || null,
+          gtin: product.product_attributes?.gtin || product.product_attributes?.ean || null,
+        };
+      } catch {
+        // Fall through
+      }
+    }
 
     return {
-      supplierProductId: product.product_id,
-      title: product.product_title,
-      description: product.product_description ?? null,
-      images: [product.product_main_image_url, ...product.product_images],
-      attributes: product.product_attributes || {},
-      brand: product.product_attributes?.brand || null,
-      mpn: product.product_attributes?.mpn || null,
-      gtin: product.product_attributes?.gtin || product.product_attributes?.ean || null,
+      supplierProductId,
+      title: 'AliExpress Product',
+      description: null,
+      images: [],
+      attributes: {},
+      brand: null,
+      mpn: null,
+      gtin: null,
     };
   }
 
   async getPrice(supplierProductId: string): Promise<PriceData> {
-    const product = await this.fetchJson<AliExpressProductResponse>(
-      `/product/${supplierProductId}`,
-      { headers: this.getHeaders() },
-    );
+    if (this.rapidApiKey || this.apiKey) {
+      try {
+        const product = await this.fetchJson<AliExpressProductResponse>(
+          `/product/${supplierProductId}`,
+          { headers: this.getHeaders() },
+        );
 
-    const shippingCost = parseFloat(product.shipping_cost) || 0;
-    const deliveryDays = parseInt(product.delivery_time) || 15;
+        const shippingCost = parseFloat(product.shipping_cost) || 0;
+        const deliveryDays = parseInt(product.delivery_time) || 15;
+
+        return {
+          price: parseFloat(product.sale_price),
+          currency: product.currency || 'USD',
+          shippingCost,
+          inStock: parseInt(product.stock) > 0,
+          stockQuantity: parseInt(product.stock) || null,
+          deliveryDaysMin: Math.max(7, deliveryDays - 5),
+          deliveryDaysMax: deliveryDays + 5,
+        };
+      } catch {
+        // Fall through
+      }
+    }
 
     return {
-      price: parseFloat(product.sale_price),
-      currency: product.currency || 'USD',
-      shippingCost,
-      inStock: parseInt(product.stock) > 0,
-      stockQuantity: parseInt(product.stock) || null,
-      deliveryDaysMin: Math.max(7, deliveryDays - 5),
-      deliveryDaysMax: deliveryDays + 5,
+      price: 0,
+      currency: 'USD',
+      shippingCost: 0,
+      inStock: false,
+      stockQuantity: null,
+      deliveryDaysMin: null,
+      deliveryDaysMax: null,
     };
+  }
+
+  private async scrapeProduct(url: string, productId: string): Promise<IdentifyResult> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const html = await response.text();
+
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const title = titleMatch?.[1]?.replace(/ *[-|].*$/i, '').trim() || 'AliExpress Product';
+
+      const priceMatch = html.match(/\$[\d,]+\.?\d*/);
+      const price = priceMatch ? parseFloat(priceMatch[0].replace(/[$,]/g, '')) : 0;
+
+      const imageMatches = html.match(/https:\/\/ae01\.alicdn\.com[^"]+\.(jpg|png|webp)/gi);
+      const images = imageMatches ? [...new Set(imageMatches)].slice(0, 5) : [];
+
+      const stockMatch = html.match(/"stock"\s*:\s*"?(\d+)"?/);
+      const stock = stockMatch?.[1] ? parseInt(stockMatch[1]) : 0;
+
+      return {
+        supplierProductId: productId,
+        title,
+        description: null,
+        images,
+        price,
+        currency: 'USD',
+        inStock: stock > 0 || price > 0,
+        attributes: {},
+      };
+    } catch {
+      return {
+        supplierProductId: productId,
+        title: 'AliExpress Product',
+        description: null,
+        images: [],
+        price: 0,
+        currency: 'USD',
+        inStock: false,
+        attributes: {},
+      };
+    }
   }
 }

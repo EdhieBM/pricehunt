@@ -241,8 +241,26 @@ export class AmazonAdapter implements SupplierAdapter {
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
       const title = titleMatch?.[1]?.replace(/ *:.*$/, '').trim() || asin;
 
-      const priceMatch = html.match(/\$[\d,]+\.?\d*/);
-      const price = priceMatch ? parseFloat(priceMatch[0].replace(/[$,]/g, '')) : 0;
+      // Try JSON-LD first (more reliable)
+      let price = 0;
+      const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g);
+      if (jsonLdMatch) {
+        for (const match of jsonLdMatch) {
+          const jsonStr = match.replace(/<script[^>]*>/, '').replace(/<\/script>/, '');
+          try {
+            const data = JSON.parse(jsonStr) as { offers?: { price?: string } };
+            if (data.offers?.price) {
+              price = parseFloat(data.offers.price);
+              break;
+            }
+          } catch { continue; }
+        }
+      }
+      // Fallback to regex
+      if (price === 0) {
+        const priceMatch = html.match(/\$[\d,]+\.?\d*/);
+        price = priceMatch ? parseFloat(priceMatch[0].replace(/[$,]/g, '')) : 0;
+      }
 
       const imageMatches = html.match(/https:\/\/m\.media-amazon\.com\/images\/I\/[^"]+\.jpg/g);
       const images = imageMatches ? [...new Set(imageMatches)].slice(0, 5) : [];
