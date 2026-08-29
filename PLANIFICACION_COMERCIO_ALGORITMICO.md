@@ -1,2615 +1,1560 @@
-# PLANIFICACIÓN COMPLETA — PLATAFORMA DE COMERCIO ALGORÍTMICO
+# PRICEHUNT — RESTRUCTURED PRODUCT & ARCHITECTURE PLANNING
 
 ---
 
-## 1. EXECUTIVE SUMMARY
+## 1. Executive Summary
 
-**Nombre del proyecto:** PriceHunt (nombre provisional)
-**Mercado inicial:** México
-**Propuesta de valor:** Ser la capa que el usuario consulta antes de comprar, garantizando que si existe una forma legítima de conseguir un producto más barato, nuestro sistema la encuentre.
+**PriceHunt** is not a price comparison tool. It is a **product verification system**.
 
-**Métrica North Star:** Average Customer Savings (ahorro promedio vs. alternativa de referencia)
+The core question PriceHunt answers is:
 
-**Modelo de negocio:** Margen mínimo por transacción + comisiones de proveedores + eventualmente membresía premium.
+> "I found this product on TikTok Shop / Amazon / wherever. Is this actually the best deal I can get?"
 
-**Stack recomendado:** Next.js + TypeScript (Node.js) + PostgreSQL + Redis + BullMQ + Meilisearch
+**Critical distinction:** PriceHunt does NOT promise to always be cheaper. It promises to **check if a better deal actually exists.** Sometimes the answer is "TikTok Shop is already the best option." That is a valid and trustworthy result.
 
-**Arquitectura:** Modular monolith con workers separados, migrable a microservicios.
+**Why this matters:** If PriceHunt always claims to find cheaper alternatives, it will lie to users and destroy trust. The product's value is **honesty**, not always winning.
 
-**MVP estimado:** 8-12 semanas, ~$2,000-4,000 USD/mes en infraestructura.
+**North Star Metric:** Customer Savings Score — weighted combination of Best Offer Rate + Average Savings + Match Accuracy + Fulfillment Success.
 
-**Riesgo principal:** Sostenibilidad de márgenes extremadamente bajos. Mitigación: volumen + eficiencia operativa + eventualmente acuerdos directos con proveedores.
+**Market:** Mexico. Mobile-first. TikTok-native users aged 18-45.
+
+**Stack:** Next.js 14 + Fastify + TypeScript + PostgreSQL 16 + Redis 7 + BullMQ + Meilisearch + Conekta.
+
+**Architecture:** Modular monolith with background workers. Migrable to services at 100k+ users.
+
+**Status:** MVP Phase 1a nearly complete (code written, 54 tests passing). This document restructures planning before continuing development.
 
 ---
 
-## 2. DEFINICIÓN EXACTA DEL PRODUCTO
+## 2. Current Project Assessment
 
-### Propuesta de valor
-Una plataforma de comercio que identifica productos desde cualquier fuente (TikTok, URLs, imágenes, búsqueda textual), los compara en múltiples proveedores, calcula el precio final real (producto + envío + impuestos + aranceles), y permite al usuario comprar al menor costo posible desde una interfaz unificada.
+### What Exists
 
-### Usuario objetivo
-- **Primario:** Compradores mexicanos de 18-45 años que buscan ofertas en redes sociales (especialmente TikTok) y quieren comprar productos sin pagar de más.
-- **Secundario:** Compradores de marketplaces que quieren verificar si están obteniendo el mejor precio.
-- **Terciario:** Compradores de productos específicos que necesitan comparar entre AliExpress, Amazon, Mercado Libre, etc.
+| Component | Status | Quality |
+|-----------|--------|---------|
+| Turborepo monorepo | ✅ Complete | Good |
+| DB schema (19 tables) | ✅ Complete | Needs review |
+| URL parser | ✅ Complete, tested | Good |
+| Matching engine (Jaccard + GTIN) | ✅ Complete, tested | Basic — needs improvement |
+| Pricing engine (5 strategies) | ✅ Complete, tested | Good |
+| Supplier adapters (8) | ✅ Written | Skeleton — need real data |
+| Ingestion service | ✅ Written | Basic |
+| Meilisearch integration | ✅ Written | Basic |
+| BullMQ workers (ingestion + matching) | ✅ Written | Not yet running |
+| API routes (7 endpoints) | ✅ Written | Not tested end-to-end |
+| Frontend (Next.js) | 🟡 Scaffolded | Pages exist but basic |
+| Tests (54) | ✅ Passing on VM | Good coverage |
+| Azure VM (Docker) | ✅ Running | Postgres + Redis + Meilisearch |
 
-### Flujo principal
+### What's Wrong
+
+1. **The matching engine is too basic.** Jaccard similarity on titles is insufficient for real product matching. We need GTIN/MPN deterministic matching, brand awareness, and eventually image matching.
+
+2. **Supplier adapters are skeletons.** Amazon, eBay, Walmart, SHEIN, Temu adapters exist but have never fetched real data. They need to be tested against real products.
+
+3. **No delivery model.** The system doesn't track delivery times, shipping costs, or inventory location. This is critical given TikTok Shop's logistics advantage.
+
+4. **No data confidence levels.** Everything is treated as confirmed. We need `confirmed / estimated / unknown` states.
+
+5. **No price explanation traceability.** We can't answer "why did PriceHunt show this price?"
+
+6. **The original plan is overengineered.** Kafka, Kubernetes, multi-country, browser extension, native mobile — none of this is needed for validation.
+
+7. **No real experiment design.** The plan mentions "100 users" but doesn't specify what to measure or how.
+
+### What's Good
+
+1. The core thesis is sound.
+2. The monorepo structure is clean.
+3. The DB schema covers most entities needed.
+4. TypeScript everywhere reduces context-switching.
+5. The modular architecture allows incremental development.
+
+---
+
+## 3. What Changed
+
+### The TikTok Shop Insight
+
+TikTok Shop is not just another source. It is:
+
+- **The primary trigger** (user sees product on TikTok)
+- **A logistics competitor** (local inventory, fast shipping, subsidized delivery)
+- **A pricing competitor** (aggressive promotions, coupons, temporary discounts)
+- **The benchmark** (PriceHunt must beat or honestly say it can't)
+
+### Implications
+
+| Before | After |
+|--------|-------|
+| Price = most important variable | Price + Delivery + Confidence = equally important |
+| Any cheaper alternative wins | Only alternatives that are genuinely better win |
+| PriceHunt always finds cheaper | PriceHunt checks IF cheaper exists |
+| TikTok is just a URL source | TikTok is the primary context |
+| Shipping is a line item | Shipping is a first-class variable |
+| All delivery estimates treated equally | Delivery confidence matters |
+
+### New Core Thesis
+
+> **"PriceHunt doesn't promise to always be cheaper than TikTok Shop. PriceHunt promises to check if a better deal actually exists."**
+
+This means PriceHunt must be capable of saying:
+- "We found an option 25% cheaper." ✅
+- "TikTok Shop is already the best option." ✅ (equally valid)
+
+---
+
+## 4. Core Product Thesis
+
+### Hypothesis
+
+> Mexican consumers who discover products on TikTok Shop (and similar platforms) would use a tool that tells them whether they're getting the best deal, including price, delivery time, and supplier reliability.
+
+### Value Proposition
+
+1. **Honesty:** We tell you the truth, even if the truth is "you already found the best deal."
+2. **Comprehensive comparison:** Not just price — landed cost, delivery, stock, supplier confidence.
+3. **Speed:** Paste URL → get answer in seconds.
+4. **Trust:** Every result is explainable and traceable.
+
+### Anti-theses (What PriceHunt is NOT)
+
+- NOT a price comparison site that always claims to win
+- NOT a marketplace (we don't hold inventory)
+- NOT a dropshipping service (initially)
+- NOT a coupon aggregator
+- NOT a price alert tool (initially)
+
+---
+
+## 5. Updated User Journey
+
+### Primary Flow: TikTok Discovery
+
 ```
-TikTok/Internet → URL/imagen/búsqueda → Product ID → Matching → Candidates → Price Collection → Normalization → Shipping → Taxes → Landed Cost → Supplier Ranking → Our Price → Checkout → Order → Purchase → Fulfillment → Tracking → Customer
+1. User sees product on TikTok/TikTok Shop
+2. User copies URL
+3. User opens PriceHunt (web app)
+4. User pastes URL
+5. PriceHunt identifies product (title, image, price, delivery)
+6. PriceHunt searches across suppliers
+7. PriceHunt calculates landed cost for each match
+8. PriceHunt ranks by: Cheapest / Fastest / Best Overall
+9. PriceHunt shows results with confidence levels
+10. User decides:
+    a. "PriceHunt found better" → Buy through PriceHunt
+    b. "TikTok is already best" → User keeps TikTok option
+    c. "Similar product exists" → User evaluates trade-off
 ```
 
-### Flujo alternativo
-1. Usuario busca por texto → resultados → selección → mismo flujo
-2. Usuario sube imagen → reverse search → identificación → mismo flujo
-3. Usuario pega URL de TikTok → extracción de producto → mismo flujo
+### Alternative Flows
 
-### MVP (Mínimo Viable Productile)
-- Pegar URL de producto (cualquier e-commerce) → identificar → buscar ofertas equivalentes → mostrar mejor precio → checkout → orden
-- Soporte inicial: URLs de TikTok Shop, AliExpress, Amazon México
-- 1 fuente de datos por producto (no necesariamente la mejor)
-- Checkout básico con Stripe o Conekta
-- Sin inventario propio
-- Envío desde proveedores
+- **Text search:** User types product name → same flow from step 6
+- **Image search:** (Phase 2) User uploads photo → reverse search → same flow
+- **Direct URL:** User has Amazon/AliExpress URL → same flow from step 5
 
-### Versión 2
-- Búsqueda por imagen (CLIP/perceptual hash)
-- Más fuentes de datos
-- Shipping engine real
-- Cálculo de impuestos
-- Admin panel básico
+### Key UX Principle
 
-### Versión 3
-- Extensión de navegador
-- App móvil
-- Múltiples proveedores por pedido
-- Acuerdos directos con proveedores
-- Programa de afiliados
-
-### Versión 4
-- Red de compra inteligente
-- Negociación directa con fabricantes
-- Predictive pricing
-- Expansión LATAM
-
-### Qué NO debemos construir inicialmente
-- Marketplace tradicional
-- Inventario propio
-- Logística propia
-- Redes sociales
-- Contenido de video
-- App móvil nativa
-- Sistema de afiliados complejo
-
-### Qué debe quedar preparado desde el principio
-- Extensibilidad de fuentes de datos
-- Schema de precios multi-proveedor
-- Sistema de matching expandible
-- API-first architecture
-- Multi-moneda preparado
-- Multi-idioma preparado
+**Never hide the truth.** If TikTok Shop wins, say so clearly. If we can't find a match, say so. If delivery is unknown, say so.
 
 ---
 
-## 3. QUÉ HACE DIFERENTE AL MODELO
+## 6. Updated Architecture
 
-### Diferenciadores clave
+### Principles
 
-| Aspecto | Competidores | Nosotros |
-|---------|--------------|----------|
-| **Objetivo** | Maximizar margen | Minimizar precio final |
-| **Fuentes** | Una fuente | Múltiples fuentes |
-| **Comparación** | Precios visibles | Precio final real (landing cost) |
-| **Matching** | Búsqueda básica | Matching multimodal (texto + imagen + atributos) |
-| **Transparencia** | Ocultan costos | Mostramos el costo real |
-| **Velocidad** | Manual | Automático y algorítmico |
+1. **Modular monolith** until 100k users
+2. **Workers separate** for crawling/pricing (CPU-intensive)
+3. **No premature microservices**
+4. **Data confidence as a first-class concept**
+5. **Every price must be explainable**
 
-### Ventaja competitiva sostenible
-1. **Data de matching:** Con el tiempo, acumulamos la base de datos de matching producto-proveedor más grande.
-2. **Eficiencia de pricing:** Nuestro algoritmo se vuelve más inteligente con cada transacción.
-3. **Relaciones con proveedores:** A mayor volumen, mejores acuerdos directos.
-4. **Confianza del usuario:** "Si existe una forma más barata, este sistema la encuentra."
-
-### Por qué no somos un comparador
-Un comparador muestra precios de múltiples tiendas. Nosotros decidimos dinámicamente la mejor fuente y vendemos directamente. La experiencia es: producto → precio → comprar. No: producto → ver 10 tiendas → elegir.
-
----
-
-## 4. ARQUITECTURA CONCEPTUAL
-
-### Modelo mental del sistema
+### Layer Structure
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CAPA DE USUARIO                          │
-│  Web App / Extensión / API                                   │
-└─────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│              CLIENT LAYER                        │
+│  Next.js (Web App) — Vercel/Pages               │
+└─────────────────────┬───────────────────────────┘
                       │
-┌─────────────────────▼───────────────────────────────────────┐
-│                CAPA DE ORQUESTACIÓN                         │
-│  Product Identification → Matching → Pricing → Checkout     │
-└─────────────────────┬───────────────────────────────────────┘
+┌─────────────────────▼───────────────────────────┐
+│              API LAYER                           │
+│  Fastify + TypeScript                            │
+│  Routes: /identify, /search, /offers, /checkout │
+└─────────────────────┬───────────────────────────┘
                       │
-┌─────────────────────▼───────────────────────────────────────┐
-│                CAPA DE DATOS                                │
-│  Product DB → Price Cache → Match Cache → Order History     │
-└─────────────────────┬───────────────────────────────────────┘
+┌─────────────────────▼───────────────────────────┐
+│           APPLICATION LAYER                      │
+│  Ingestion → Matching → Pricing → Ranking        │
+│  (all in-process, modular monolith)              │
+└─────────────────────┬───────────────────────────┘
                       │
-┌─────────────────────▼───────────────────────────────────────┐
-│                CAPA DE FUENTES                              │
-│  AliExpress │ Amazon │ Mercado Libre │ Proveedores │ Feeds  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────▼───────────────────────────┐
+│            WORKER LAYER                          │
+│  BullMQ: Crawler, Price Update, Order Processing │
+│  (separate process, scalable independently)      │
+└─────────────────────┬───────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────┐
+│             DATA LAYER                           │
+│  PostgreSQL + Redis + Meilisearch                │
+└─────────────────────┬───────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────┐
+│          SOURCE ADAPTERS LAYER                   │
+│  AliExpress | Amazon | ML | eBay | Walmart | ... │
+│  Each adapter implements: identify, search,      │
+│  getProduct, getPrice                           │
+└─────────────────────────────────────────────────┘
 ```
 
-### Principios arquitectónicos
-1. **CQRS-lite:** Lecturas y escrituras con modelos ligeramente diferentes
-2. **Event sourcing para precios:** Cada cambio de precio es un evento
-3. **Caching agresivo:** Precios cacheados con TTL corto
-4. **Graceful degradation:** Si una fuente falla, usar alternativas
-5. **Idempotency:** Todas las operaciones deben ser idempotentes
-6. **Audit trail:** Cada precio mostrado debe ser reproducible
+### What Stays as Monolith
+
+- Product ingestion (orchestration only)
+- Matching (CPU-bound but fast enough in-process)
+- Pricing (deterministic, fast)
+- Ranking/scoring
+- Checkout/order management
+- API routing
+
+### What Eventually Separates
+
+- **Crawler service** (at 100k+ products, needs independent scaling)
+- **Pricing engine** (at 100k+ SKUs, needs independent refresh cycles)
+- **Order service** (at 10k+ orders/month, needs transaction isolation)
+- **Analytics pipeline** (at 100k+ events/day, needs stream processing)
+
+### NOT Needed
+
+- Kafka (BullMQ is sufficient for MVP through 100k users)
+- Kubernetes (single VPS is fine for MVP)
+- Microservices (modular monolith is correct for this stage)
+- GraphQL (REST is sufficient)
+- Elasticsearch (Meilisearch handles search needs)
 
 ---
 
-## 5. ARQUITECTURA TÉCNICA
+## 7. Source Taxonomy
 
-### Decisión: Modular Monolith + Workers
+### Categories
 
-**Por qué NO microservicios inicialmente:**
-- Complejidad operativa excesiva para MVP
-- Comunicación inter-servicio innecesaria
-- Dificultad de deploy y debugging
-- Overhead de red innecesario
-- No tenemos equipo grande
+| Category | Description | Examples |
+|----------|-------------|----------|
+| **Marketplace** | Platform connecting buyers and sellers | Amazon, MercadoLibre, eBay, Walmart, TikTok Shop, Facebook Marketplace |
+| **Retailer** | Sells directly to consumers | Liverpool, Palacio de Hierro, Costco, Coppel, Sears, Sanborns, Home Depot, Office Depot |
+| **Chinese Marketplace** | Platforms connecting Chinese manufacturers to buyers | AliExpress, Temu, SHEIN, DHgate, Banggood, Geekbuying |
+| **Wholesale/B2B** | Bulk purchasing platforms | Alibaba, 1688, Chinagoods, Yiwugo, Made-in-China, Global Sources, HKTDC |
+| **Dropshipping Intermediary** | Platforms for resellers | CJdropshipping, Chinavasion, Tomtop, Spocket |
+| **Delivery Platform** | Local delivery services | Rappi, DiDi Store |
+| **Manufacturer Directory** | Directories of manufacturers | IndiaMART, TradeIndia |
+| **Retail Wholesale** | Wholesale for retailers | Faire, Tundra, Wholesale Central, SaleHoo |
+| **Social Commerce** | Commerce on social platforms | TikTok Shop |
 
-**Por qué NO monolito tradicional:**
-- Necesitamos workers separados para crawling
-- Precios deben actualizarse independientemente
-- Scraping puede ser intensivo en CPU
-- Necesitamos escalabilidad independiente
+### Source Viability Assessment
 
-**Por qué Modular Monolith:**
-- Deploy simple
-- Compartir tipos y validaciones
-- Transacciones ACID cuando sea necesario
-- Fácil de debuggear
-- Fácil de refactorizar a microservicios después
+#### Tier 1: Core Sources (MVP)
 
-### Evolución por escala
+| Source | Type | Access Method | Legal? | Viable? | Notes |
+|--------|------|---------------|--------|---------|-------|
+| AliExpress | Chinese Marketplace | Affiliate API (Admitad) | ✅ Yes | ✅ Yes | Best for cross-border comparison |
+| Amazon MX | Marketplace | Product Advertising API | ✅ Yes | ✅ Yes | Largest selection in Mexico |
+| MercadoLibre | Marketplace | Public API | ✅ Yes | ✅ Yes | Largest marketplace in LATAM |
+| eBay | Marketplace | Browse API | ✅ Yes | ✅ Yes | Good for international products |
+| Walmart MX | Marketplace/Retailer | Scraping (public pages) | ⚠️ Check ToS | ⚠️ Maybe | Large selection, prices need verification |
 
-| Usuarios | Arquitectura | Servidores |
-|----------|--------------|------------|
-| MVP | Modular monolith | 1-2 |
-| 10k | Monolith + 2 workers | 3-4 |
-| 100k | Monolith + workers + read replicas | 6-10 |
-| 1M | Extracción a servicios críticos | 15-25 |
-| 10M | Microservicios selectivos | 30+ |
+#### Tier 2: Secondary Sources (Post-MVP)
 
-### Cómo escalar de MVP a 10M usuarios
+| Source | Type | Access Method | Legal? | Viable? | Notes |
+|--------|------|---------------|--------|---------|-------|
+| SHEIN | Chinese Marketplace | Scraping | ⚠️ Check ToS | ⚠️ Maybe | Fashion-focused, anti-bot measures |
+| Temu | Chinese Marketplace | Scraping | ⚠️ Check ToS | ⚠️ Maybe | Growing fast, anti-bot measures |
+| TikTok Shop | Social Commerce | URL extraction only | ⚠️ No official API | ⚠️ Limited | Can extract product info from URLs |
+| Liverpool | Retailer | Scraping | ⚠️ Check ToS | ⚠️ Maybe | Mexican department store |
+| Palacio de Hierro | Retailer | Scraping | ⚠️ Check ToS | ⚠️ Maybe | Luxury segment |
+| Costco | Retailer | No public data | ❌ No | ❌ No | Membership required, no API |
 
-**Fase 1 (MVP):** Todo en un monolith con workers
-**Fase 2 (10k-100k):** Separar crawler y pricing engine
-**Fase 3 (100k-1M):** Separar checkout y payments
-**Fase 4 (1M+):** Microservicios para componentes críticos
+#### Tier 3: Chinese Wholesale (Future)
 
----
+| Source | Type | Access Method | Legal? | Viable? | Notes |
+|--------|------|---------------|--------|---------|-------|
+| Alibaba | B2B | Affiliate API | ✅ Yes | ✅ Yes | Best for wholesale pricing reference |
+| 1688 | Wholesale (CN) | No public API | ❌ No | ❌ No | Chinese-only, no international API |
+| Chinagoods | Wholesale (CN) | No public API | ❌ No | ❌ No | Chinese-only |
+| Yiwugo | Wholesale (CN) | No public API | ❌ No | ❌ No | Chinese-only |
+| DHgate | Marketplace | Affiliate program | ⚠️ Check | ⚠️ Maybe | Smaller than AliExpress |
+| Banggood | Marketplace | Affiliate program | ⚠️ Check | ⚠️ Maybe | Similar to AliExpress |
+| CJdropshipping | Dropshipping | API | ✅ Yes | ✅ Yes | Good for wholesale pricing |
 
-## 6. COMPONENTES DEL SISTEMA
+#### Tier 4: Not Viable for MVP
 
-### Componentes core
+| Source | Reason |
+|--------|--------|
+| Made-in-China | Requires manufacturer relationship |
+| Global Sources | B2B, requires trade shows |
+| HKTDC | B2B, requires registration |
+| IndiaMART | India-focused, not relevant for Mexico |
+| TradeIndia | India-focused |
+| Faire | US-focused wholesale |
+| Tundra | US-focused wholesale |
+| Wholesale Central | US-focused |
+| SaleHoo | Subscription-based directory |
+| Facebook Marketplace | No API, login required, ToS prohibits |
 
-| Componente | Descripción | Prioridad |
-|------------|-------------|-----------|
-| **Product Service** | CRUD de productos, variantes, atributos | P0 |
-| **Product Ingestion** | Recepción y normalización de productos desde fuentes | P0 |
-| **Product Matching** | Identificación y comparación de productos entre fuentes | P0 |
-| **Price Engine** | Cálculo de precio final y estrategia de pricing | P0 |
-| **Order Service** | Gestión de órdenes, checkout, pagos | P0 |
-| **Supplier Adapter** | Integración con cada proveedor | P0 |
-| **Search Engine** | Búsqueda de productos (texto, filtros) | P1 |
-| **Shipping Engine** | Cálculo de envío y tiempos | P1 |
-| **Tax Engine** | Cálculo de impuestos y aranceles | P1 |
-| **Inventory Engine** | Control de stock virtual | P1 |
-| **Notification Service** | Emails, SMS, push | P1 |
-| **Admin Panel** | Panel de administración | P2 |
-| **Analytics Pipeline** | Métricas y reporting | P2 |
-| **Crawler Scheduler** | Programación de crawling | P2 |
-| **Image Service** | Procesamiento de imágenes | P2 |
-| **Cache Layer** | Redis para caching | P0 |
-| **Queue System** | BullMQ para tareas async | P0 |
-| **CDN** | Cloudflare para assets estáticos | P0 |
-| **Object Storage** | S3-compatible para imágenes | P1 |
-| **Monitoring** | Métricas, logs, alertas | P1 |
+### Source Reliability Model
 
-### Componentes de soporte
-
-| Componente | Descripción | Prioridad |
-|------------|-------------|-----------|
-| **Auth Service** | Autenticación y autorización | P0 |
-| **Rate Limiter** | Protección contra abuso | P1 |
-| **Fraud Detection** | Detección de fraude básico | P2 |
-| **Audit Logger** | Logs de auditoría | P1 |
-| **Secrets Manager** | Gestión de secretos | P0 |
-| **Backup System** | Backups automatizados | P1 |
-| **Disaster Recovery** | Plan de recuperación | P2 |
-
-### Componentes que el prompt olvida
-
-1. **Currency Service:** Conversión de monedas en tiempo real
-2. **Affiliate Manager:** Gestión de programas de afiliados
-3. **Content Moderation:** Moderación de contenido de usuarios
-4. **Ab Testing Framework:** Para experimentación
-5. **Feature Flags:** Para lanzamientos graduales
-6. **Email Template Service:** Templates de transaccionales
-7. **Webhook Manager:** Para integraciones externas
-8. **Health Check System:** Monitoreo de salud de servicios
-9. **Circuit Breaker:** Para fallas de proveedores
-10. **Retry Logic Manager:** Reintentos inteligentes
+Each source should track:
+- **Uptime:** % of time the adapter works
+- **Data freshness:** How old is the data
+- **Data quality:** % of results with complete information
+- **Rate limit compliance:** Are we respecting limits
+- **Legal status:** Is our access method approved
 
 ---
 
-## 7. DATABASE DESIGN
+## 8. Supplier Reliability Model
 
-### Schema conceptual PostgreSQL
+### Critical Distinction: Source ≠ Supplier
 
-```sql
--- Usuarios
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    name VARCHAR(255),
-    phone VARCHAR(20),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
+**Source** = The platform (Amazon, AliExpress, MercadoLibre)
+**Supplier** = The individual seller on that platform
 
--- Direcciones
-CREATE TABLE addresses (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    street VARCHAR(255),
-    city VARCHAR(100),
-    state VARCHAR(100),
-    postal_code VARCHAR(10),
-    country VARCHAR(3) DEFAULT 'MX',
-    is_default BOOLEAN DEFAULT false
-);
+A platform can be legitimate while containing terrible suppliers.
 
--- Marcas
-CREATE TABLE brands (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) UNIQUE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Source Reliability
 
--- Productos (entidad canonical)
-CREATE TABLE products (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    canonical_name TEXT NOT NULL,
-    slug VARCHAR(255) UNIQUE,
-    brand_id UUID REFERENCES brands(id),
-    category_id UUID,
-    gtin VARCHAR(14),
-    mpn VARCHAR(100),
-    description TEXT,
-    attributes JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
+| Factor | Weight | Measurement |
+|--------|--------|-------------|
+| API availability | High | Uptime % |
+| Data completeness | High | % of products with full data |
+| Rate limit friendliness | Medium | Requests per minute allowed |
+| Legal clarity | High | Clear ToS |
+| Price accuracy | High | % match between API and website |
 
--- Variantes de producto
-CREATE TABLE product_variants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_id UUID REFERENCES products(id),
-    sku VARCHAR(100),
-    name VARCHAR(255),
-    attributes JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Supplier Reliability
 
--- Imágenes de producto
-CREATE TABLE product_images (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_id UUID REFERENCES products(id),
-    variant_id UUID REFERENCES product_variants(id),
-    url TEXT NOT NULL,
-    alt_text VARCHAR(255),
-    position INTEGER DEFAULT 0,
-    is_primary BOOLEAN DEFAULT false
-);
+| Factor | Weight | Measurement |
+|--------|--------|-------------|
+| Verification status | High | Verified / Unverified |
+| Time operating | Medium | Months/years on platform |
+| Rating | High | Platform rating (1-5 stars) |
+| Number of sales | Medium | Total transactions |
+| Return rate | High | % of orders returned |
+| Response time | Medium | Average response time |
+| Stock consistency | High | % of time item is in stock |
+| Price consistency | Medium | Price volatility over time |
+| Shipping fulfillment | High | % of orders shipped on time |
+| Product quality | Medium | Average review rating |
+| Certifications | Low | Relevant certifications |
 
--- Proveedores
-CREATE TABLE suppliers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) UNIQUE,
-    type VARCHAR(50), -- 'api', 'feed', 'scraping', 'direct'
-    base_url TEXT,
-    api_key_encrypted TEXT,
-    config JSONB DEFAULT '{}',
-    is_active BOOLEAN DEFAULT true,
-    reliability_score DECIMAL(3,2) DEFAULT 0.5,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Productos de proveedores
-CREATE TABLE supplier_products (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    supplier_id UUID REFERENCES suppliers(id),
-    supplier_product_id VARCHAR(255),
-    product_id UUID REFERENCES products(id),
-    variant_id UUID REFERENCES product_variants(id),
-    match_confidence DECIMAL(3,2),
-    raw_data JSONB,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Precios (event sourcing)
-CREATE TABLE price_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    supplier_product_id UUID REFERENCES supplier_products(id),
-    price DECIMAL(12,2) NOT NULL,
-    currency VARCHAR(3) DEFAULT 'USD',
-    shipping_cost DECIMAL(12,2),
-    tax_amount DECIMAL(12,2),
-    final_price DECIMAL(12,2),
-    in_stock BOOLEAN DEFAULT true,
-    timestamp TIMESTAMP DEFAULT NOW()
-);
-
--- Precio actual (vista materializada)
-CREATE TABLE current_prices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    supplier_product_id UUID REFERENCES supplier_products(id) UNIQUE,
-    price DECIMAL(12,2),
-    currency VARCHAR(3) DEFAULT 'USD',
-    shipping_cost DECIMAL(12,2),
-    tax_amount DECIMAL(12,2),
-    final_price DECIMAL(12,2),
-    in_stock BOOLEAN DEFAULT true,
-    last_updated TIMESTAMP DEFAULT NOW()
-);
-
--- Ofertas (resultado del ranking)
-CREATE TABLE offers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_id UUID REFERENCES products(id),
-    variant_id UUID REFERENCES product_variants(id),
-    supplier_product_id UUID REFERENCES supplier_products(id),
-    our_price DECIMAL(12,2),
-    our_margin DECIMAL(12,2),
-    margin_percentage DECIMAL(5,2),
-    score DECIMAL(3,2),
-    is_best_offer BOOLEAN DEFAULT false,
-    calculated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Órdenes
-CREATE TABLE orders (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    status VARCHAR(50) DEFAULT 'pending',
-    total DECIMAL(12,2),
-    currency VARCHAR(3) DEFAULT 'MXN',
-    shipping_address_id UUID REFERENCES addresses(id),
-    payment_method VARCHAR(50),
-    payment_id VARCHAR(255),
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Items de orden
-CREATE TABLE order_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID REFERENCES orders(id),
-    product_id UUID REFERENCES products(id),
-    variant_id UUID REFERENCES product_variants(id),
-    supplier_product_id UUID REFERENCES supplier_products(id),
-    quantity INTEGER DEFAULT 1,
-    unit_price DECIMAL(12,2),
-    total_price DECIMAL(12,2),
-    -- Snapshot de precio al momento de compra
-    price_snapshot JSONB
-);
-
--- Órdenes a proveedores
-CREATE TABLE supplier_orders (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID REFERENCES orders(id),
-    supplier_id UUID REFERENCES suppliers(id),
-    supplier_order_id VARCHAR(255),
-    status VARCHAR(50),
-    total_cost DECIMAL(12,2),
-    tracking_number VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Pagos
-CREATE TABLE payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID REFERENCES orders(id),
-    provider VARCHAR(50),
-    provider_payment_id VARCHAR(255),
-    amount DECIMAL(12,2),
-    currency VARCHAR(3),
-    status VARCHAR(50),
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Envíos
-CREATE TABLE shipments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID REFERENCES orders(id),
-    supplier_order_id UUID REFERENCES supplier_orders(id),
-    carrier VARCHAR(100),
-    service VARCHAR(100),
-    tracking_number VARCHAR(255),
-    status VARCHAR(50),
-    estimated_delivery TIMESTAMP,
-    actual_delivery TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Eventos de tracking
-CREATE TABLE tracking_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    shipment_id UUID REFERENCES shipments(id),
-    status VARCHAR(100),
-    location VARCHAR(255),
-    timestamp TIMESTAMP,
-    raw_data JSONB
-);
-
--- Reglas de pricing
-CREATE TABLE pricing_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255),
-    type VARCHAR(50), -- 'percentage', 'fixed', 'dynamic'
-    config JSONB,
-    priority INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Snapshots de precio (para auditoría)
-CREATE TABLE price_snapshots (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    offer_id UUID REFERENCES offers(id),
-    supplier_price DECIMAL(12,2),
-    shipping_cost DECIMAL(12,2),
-    tax_amount DECIMAL(12,2),
-    total_landed_cost DECIMAL(12,2),
-    our_price DECIMAL(12,2),
-    margin DECIMAL(12,2),
-    timestamp TIMESTAMP DEFAULT NOW()
-);
-
--- Audit log
-CREATE TABLE audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_type VARCHAR(100),
-    entity_id UUID,
-    action VARCHAR(50),
-    user_id UUID,
-    changes JSONB,
-    ip_address INET,
-    timestamp TIMESTAMP DEFAULT NOW()
-);
-```
-
-### Índices críticos
-
-```sql
--- Productos
-CREATE INDEX idx_products_gtin ON products(gtin);
-CREATE INDEX idx_products_brand ON products(brand_id);
-CREATE INDEX idx_products_category ON products(category_id);
-CREATE INDEX idx_products_attributes ON products USING GIN(attributes);
-
--- Supplier products
-CREATE INDEX idx_supplier_products_supplier ON supplier_products(supplier_id);
-CREATE INDEX idx_supplier_products_product ON supplier_products(product_id);
-CREATE INDEX idx_supplier_products_match ON supplier_products(match_confidence);
-
--- Precios
-CREATE INDEX idx_current_prices_product ON current_prices(supplier_product_id);
-CREATE INDEX idx_price_events_timestamp ON price_events(timestamp);
-
--- Ofertas
-CREATE INDEX idx_offers_product ON offers(product_id);
-CREATE INDEX idx_offers_best ON offers(is_best_offer) WHERE is_best_offer = true;
-
--- Órdenes
-CREATE INDEX idx_orders_user ON orders(user_id);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_created ON orders(created_at);
-
--- Tracking
-CREATE INDEX idx_tracking_shipment ON tracking_events(shipment_id);
-```
-
-### Estrategia de datos
-
-- **price_events:** Append-only, particionado por mes, TTL de 2 años
-- **current_prices:** Actualizado en cada refresh de precio
-- **price_snapshots:** Para debugging, TTL de 6 meses
-- **audit_logs:** Retención de 1 año, particionado por trimestre
-- **supplier_products.raw_data:** JSONB, indexado para búsqueda
-
----
-
-## 8. PRODUCT INGESTION
-
-### Estrategia de fuentes
-
-#### Tier 1 — Integraciones oficiales (MVP)
-| Fuente | Mecanismo | Dificultad | Legalidad |
-|--------|-----------|------------|-----------|
-| **AliExpress** | API afiliado (Admitad/alternative) | Media | ✅ Permitido |
-| **Amazon** | Product Advertising API | Media | ✅ Permitido con ToS |
-| **Mercado Libre** | API pública | Baja | ✅ Permitido |
-
-#### Tier 2 — Feeds/Afiliados
-| Fuente | Mecanismo | Dificultad | Legalidad |
-|--------|-----------|------------|-----------|
-| **Google Shopping** | Feed de afiliados | Baja | ✅ Permitido |
-| **ShareASale** | API | Baja | ✅ Permitido |
-| **CJ Affiliate** | API | Baja | ✅ Permitido |
-| **Impact** | API | Baja | ✅ Permitido |
-
-#### Tier 3 — Acuerdos con proveedores
-| Fuente | Mecanismo | Dificultad | Legalidad |
-|--------|-----------|------------|-----------|
-| **Proveedores locales** | API/Webhook/CSV | Media | ✅ Permitido |
-| **Distribuidores** | API directa | Alta | ✅ Permitido |
-
-#### Tier 4 — Mecanismos permitidos de crawling
-| Fuente | Mecanismo | Dificultad | Legalidad |
-|--------|-----------|------------|-----------|
-| **Páginas con robots.txt abierto** | HTTP scraping | Media | ⚠️ Revisar ToS |
-| **Sitios públicos** | Fetch + parse | Baja | ⚠️ Revisar ToS |
-
-#### Tier 5 — Fuentes experimentales
-| Fuente | Mecanismo | Dificultad | Legalidad |
-|--------|-----------|------------|-----------|
-| **TikTok** | Extracción de URL | Alta | ⚠️ No oficial |
-| **Redes sociales** | Scraping público | Alta | ⚠️ Variable |
-
-### Para cada mecanismo
-
-| Mecanismo | Dificultad | Estabilidad | Costo | Escalabilidad | Rate Limits | Mantenimiento | Calidad |
-|-----------|------------|-------------|-------|---------------|-------------|---------------|---------|
-| API oficial | Media | Alta | Baja-Media | Alta | Limitados | Baja | Alta |
-| Feed de afiliados | Baja | Alta | Baja | Alta | Generosos | Baja | Media |
-| Scraping | Media | Media | Media | Media | Variables | Alta | Variable |
-| CSV manual | Baja | Alta | Gratis | Baja | N/A | Media | Media |
-| Webhook | Media | Alta | Baja | Alta | N/A | Baja | Alta |
-
-### Arquitectura de ingestion
+### Supplier Score Calculation
 
 ```
-Source → Adapter → Validator → Normalizer → Matcher → Price Engine → Storage
-  │         │          │           │           │           │
-  │         │          │           │           │           └─ Event: price.updated
-  │         │          │           │           └─ Event: match.found
-  │         │          │           └─ Normalize attributes, images, etc.
-  │         │          └─ Validate required fields
-  │         └─ Source-specific adapter
-  └─ Raw data from source
-```
-
----
-
-## 9. PRODUCT MATCHING ENGINE
-
-### Arquitectura híbrida
-
-#### Layer 1: Deterministic Matching (Velocidad)
-```python
-def deterministic_match(product_a, product_b):
-    # GTIN/EAN match → 100% confidence
-    if product_a.gtin and product_b.gtin:
-        if product_a.gtin == product_b.gtin:
-            return MatchResult(type="exact", confidence=1.0)
-    
-    # MPN + Brand match → 95% confidence
-    if product_a.mpn and product_b.mpn:
-        if product_a.brand == product_b.brand and product_a.mpn == product_b.mpn:
-            return MatchResult(type="exact", confidence=0.95)
-    
-    # SKU exact match → 90% confidence
-    if product_a.sku and product_b.sku:
-        if product_a.sku == product_b.sku:
-            return MatchResult(type="exact", confidence=0.90)
-    
-    return None
-```
-
-#### Layer 2: Text Matching (Semántico)
-```python
-def text_match(product_a, product_b):
-    # Embedding similarity using sentence-transformers
-    embedding_a = encode(product_a.title + " " + product_a.description)
-    embedding_b = encode(product_b.title + " " + product_b.description)
-    similarity = cosine_similarity(embedding_a, embedding_b)
-    
-    # BM25 for keyword matching
-    bm25_score = bm25_search(product_a.title, [product_b.title])
-    
-    # Combined score
-    text_score = 0.7 * similarity + 0.3 * bm25_score
-    
-    return text_score
-```
-
-#### Layer 3: Image Matching (Visual)
-```python
-def image_match(product_a, product_b):
-    # Perceptual hash (rápido, para pre-filtering)
-    hash_a = phash(product_a.images[0])
-    hash_b = phash(product_b.images[0])
-    hash_similarity = 1 - hamming_distance(hash_a, hash_b) / 64
-    
-    # CLIP embedding (semántico visual)
-    clip_a = clip_encode(product_a.images[0])
-    clip_b = clip_encode(product_b.images[0])
-    clip_similarity = cosine_similarity(clip_a, clip_b)
-    
-    return 0.4 * hash_similarity + 0.6 * clip_similarity
-```
-
-#### Layer 4: Multimodal Fusion
-```python
-def multimodal_match(product_a, product_b):
-    # Deterministic (si existe, es definitivo)
-    det_match = deterministic_match(product_a, product_b)
-    if det_match:
-        return det_match
-    
-    # Text similarity
-    text_score = text_match(product_a, product_b)
-    
-    # Image similarity
-    image_score = image_match(product_a, product_b)
-    
-    # Attribute comparison
-    attr_score = attribute_similarity(product_a.attributes, product_b.attributes)
-    
-    # Brand/Model bonus
-    brand_bonus = 0.1 if product_a.brand == product_b.brand else 0
-    model_bonus = 0.1 if product_a.model == product_b.model else 0
-    
-    # Category penalty (if different category, reduce confidence)
-    category_penalty = -0.2 if product_a.category != product_b.category else 0
-    
-    # Weighted combination
-    final_score = (
-        0.35 * text_score +
-        0.35 * image_score +
-        0.20 * attr_score +
-        0.10 * (brand_bonus + model_bonus) +
-        category_penalty
-    )
-    
-    # Classification
-    if final_score >= 0.95:
-        return MatchResult(type="exact", confidence=final_score)
-    elif final_score >= 0.85:
-        return MatchResult(type="high_confidence", confidence=final_score)
-    elif final_score >= 0.70:
-        return MatchResult(type="review", confidence=final_score)
-    else:
-        return MatchResult(type="no_match", confidence=final_score)
-```
-
-### Score de confianza (calibración)
-
-**No asumir números fijos.** La calibración debe hacerse con:
-1. **Dataset de ground truth:** 1000+ pares de productos conocidos
-2. **A/B testing:** Comparar tasas de conversión por nivel de confianza
-3. **Feedback loop:** Los usuarios reportan matches incorrectos
-4. **Iteración continua:** Ajustar pesos basado en datos reales
-
-**Rangos iniciales (para MVP):**
-- 0.95-1.00: Exact match (mostrar como "mismo producto")
-- 0.85-0.94: High confidence (mostrar con nota "producto similar")
-- 0.70-0.84: Review needed (requiere validación humana o IA)
-- <0.70: No match
-
-### Datos necesarios para matching
-
-**Obligatorios:**
-- Título
-- Marca (si existe)
-- Imágenes
-
-**Deseables:**
-- GTIN/EAN/UPC
-- MPN
-- SKU
-- Modelo
-- Descripción
-- Categoría
-- Atributos (color, talla, capacidad, etc.)
-
----
-
-## 10. PRICING ENGINE
-
-### Fórmula de costo final del proveedor
-
-```
-Final Supplier Cost =
-  Product Cost
-  + Shipping Cost (to customer)
-  + Import Duties (if applicable)
-  + Taxes (IVA)
-  + Payment Processing Fee
-  + Fulfillment Cost
-  + Expected Failure Cost (refund rate * average cost)
-  + Currency Conversion Fee (if applicable)
-```
-
-### Nuestro precio al cliente
-
-```
-Our Customer Price =
-  Final Supplier Cost
-  + Minimum Viable Margin
-  
-Subject to:
-  - Competitive: ≤ competitor's best price
-  - Sustainable: ≥ minimum viable margin (configurable)
-  - Transparent: Must represent real final cost
-```
-
-### Estrategias de pricing
-
-#### Strategy A: Ser $1 más barato
-```
-when: competitor_price exists
-then: our_price = competitor_price - 1
-constraint: our_price >= min_viable_price
-```
-**Cuándo usar:** Cuando tenemos un competidor claro y queremos ganar por precio.
-
-#### Strategy B: Ser X% más barato
-```
-when: competitor_price exists
-then: our_price = competitor_price * (1 - discount_percentage)
-constraint: our_price >= min_viable_price
-```
-**Cuándo usar:** Para categorías donde el margen es más flexible.
-
-#### Strategy C: Precio mínimo con margen mínimo
-```
-our_price = final_supplier_cost * (1 + min_margin_percentage)
-constraint: min_margin_percentage >= 0.02 (2% mínimo)
-```
-**Cuándo usar:** Por defecto cuando no hay competidor claro.
-
-#### Strategy D: Precio igual al mejor
-```
-when: competitor_price < our_calculated_price
-then: our_price = competitor_price
-constraint: our_price >= final_supplier_cost (no pérdida)
-```
-**Cuándo usar:** Cuando no podemos mejorar pero no queremos perder la venta.
-
-#### Strategy E: Precio dinámico basado en competencia
-```
-our_price = dynamic_calculator(
-  competitor_prices[],
-  our_cost,
-  demand_signal,
-  stock_level,
-  supplier_reliability
+supplier_score = (
+    0.25 * verification_score +
+    0.20 * rating_score +
+    0.20 * fulfillment_score +
+    0.15 * stock_consistency +
+    0.10 * time_operating +
+    0.10 * return_rate_inverse
 )
 ```
-**Cuándo usar:** En fase avanzada con suficientes datos.
 
-#### Strategy F: Margen negativo controlado
-```
-when: strategic_product == true AND max_loss_per_order <= threshold
-then: our_price = final_supplier_cost * (1 - loss_percentage)
-```
-**Cuándo usar:** Solo para:
-- Productos de adquisición (primeras compras de usuario)
-- Productos virales (maximizar volumen)
-- NUNCA por error del algoritmo
+### States
 
-### Árbol de decisión de estrategia
+- **Verified:** Platform-verified seller with history
+- **Established:** Operating >6 months with >100 sales
+- **New:** Operating <6 months or <100 sales
+- **Unknown:** Insufficient data
+- **Blocked:** Supplier flagged for issues
+
+---
+
+## 9. Product Matching Model
+
+### Match Types
+
+| Type | Confidence | Description | Action |
+|------|------------|-------------|--------|
+| **Exact** | 0.95-1.00 | Same product, same variant, same GTIN/MPN | Show as "same product" |
+| **Strong** | 0.85-0.94 | Very likely same product, multiple evidence points | Show with note "very likely same" |
+| **Similar** | 0.70-0.84 | Similar product, possibly different variant | Show with note "similar product" |
+| **Weak** | 0.50-0.69 | Possibly related, low confidence | Show only if user expands search |
+| **Invalid** | <0.50 | Not a match | Don't show |
+
+### Matching Data Points
+
+#### Deterministic (Highest Priority)
+
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| GTIN/EAN/UPC match | 1.0 (definitive) | If GTINs match, it's the same product |
+| MPN + Brand match | 0.95 | Manufacturer part number + brand |
+| SKU match (same platform) | 0.90 | Only within same platform |
+
+#### Semantic (High Priority)
+
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Title similarity | 0.30 | Jaccard + tokenization |
+| Brand match | 0.15 | Exact brand match bonus |
+| Category match | 0.10 | Same category bonus |
+| Description similarity | 0.10 | TF-IDF or embeddings |
+| Attribute match | 0.15 | Color, size, capacity, etc. |
+| Price range | 0.05 | Products in similar price range |
+| Image similarity | 0.15 | Perceptual hash + CLIP (Phase 2) |
+
+#### Classification Rules
 
 ```
-¿Tenemos competidor claro?
-  ├─ Sí → ¿Nuestro costo es menor?
-  │        ├─ Sí → Strategy A ($1 menos) o B (% menos)
-  │        └─ No → ¿Podemos igualar sin pérdida?
-  │                 ├─ Sí → Strategy D (igualar)
-  │                 └─ No → Strategy C (mínimo con margen)
-  └─ No → Strategy C (mínimo con margen)
+if gtin_match:
+    return ExactMatch(confidence=1.0)
+
+if mpn_match and brand_match:
+    return ExactMatch(confidence=0.95)
+
+if title_score > 0.85 and brand_match and price_range_close:
+    return StrongMatch(confidence=combined_score)
+
+if title_score > 0.70 and (brand_match or category_match):
+    return SimilarMatch(confidence=combined_score)
+
+if title_score > 0.50:
+    return WeakMatch(confidence=combined_score)
+
+return NoMatch
+```
+
+### What NOT to Match
+
+- Different products in same category
+- Different color/size variants (show as variant, not match)
+- Accessories vs. main products
+- Generic vs. branded
+
+---
+
+## 10. Landed Cost Model
+
+### Formula
+
+```
+landed_cost = (
+    product_price
+    + shipping_cost
+    + import_duties (if applicable)
+    + taxes (IVA 16%)
+    + payment_processing_fee
+    + currency_conversion_fee (if applicable)
+    + other_mandatory_costs
+)
+```
+
+### Component Breakdown
+
+| Component | Source | Confidence |
+|-----------|--------|------------|
+| Product price | Supplier API/scraping | High |
+| Shipping cost | Supplier API / estimation | Medium-Low |
+| Import duties | Calculation based on HS code | Medium |
+| IVA (16%) | Calculation | High |
+| Payment fees | Conekta (2.9% + $2.50 MXN) | High |
+| Exchange rate | Exchange rate API | High (real-time) |
+
+### Shipping Confidence Levels
+
+| Level | Description | Example |
+|-------|-------------|---------|
+| **Confirmed** | Exact shipping cost from API | "$45.00 MXN via Estafeta" |
+| **Estimated** | Based on historical data or calculator | "Estimated $30-60 MXN" |
+| **Free** | Confirmed free shipping | "$0 — Envío gratis" |
+| **Unknown** | Cannot determine | "Shipping cost unknown" |
+
+### Import Duties (for cross-border)
+
+- **De minimis:** Orders under $50 USD may be exempt
+- **Standard rate:** 16% IVA + potential duties based on HS code
+- **DDP (Delivered Duty Paid):** Supplier handles taxes
+- **DDU (Delivered Duty Unpaid):** Customer pays at customs
+
+### Currency Conversion
+
+```
+If supplier_currency != 'MXN':
+    exchange_rate = get_exchange_rate(supplier_currency, 'MXN')
+    exchange_fee = 0.02  // 2% typical bank/conversion fee
+    converted_price = product_price * exchange_rate * (1 + exchange_fee)
 ```
 
 ---
 
-## 11. BEST OFFER ENGINE
+## 11. Delivery Model
 
-### Definición matemática de "Best Offer"
+### Delivery as First-Class Variable
 
-**No es simplemente `min(price)`.** Es:
-
-```
-Best Offer = argmax(offer_score) where:
-  offer_score = w1 * price_score + w2 * delivery_score + w3 * reliability_score + w4 * match_confidence + w5 * return_score
-```
-
-**Pero con restricción dura:**
-```
-if any_offer.has_price_difference > 5% from best_price:
-  prioritize_price = true
-  delivery_weight *= 0.3
-```
-
-### Componentes del score
-
-#### Price Score (50% del peso)
-```
-price_score = 1 - (offer_price - min_price) / min_price
-```
-- Máxima prioridad: minimizar precio final
-
-#### Delivery Score (20% del peso)
-```
-delivery_score = 1 - (delivery_days - min_days) / max_acceptable_days
-```
-- Solo relevante si el precio es competitivo
-
-#### Reliability Score (15% del peso)
-```
-reliability_score = supplier.reliability_score  # 0-1 basado en historial
-```
-
-#### Match Confidence (10% del peso)
-```
-match_score = product_match.confidence  # Del matching engine
-```
-
-#### Return Score (5% del peso)
-```
-return_score = 1 - supplier.return_rate
-```
-
-### Reglas duras (no ponderables)
-
-1. **Confianza mínima de match:** Si match_confidence < 0.70, no ofrecer
-2. **Stock:** Si no hay stock, excluir oferta
-3. **Proveedor bloqueado:** Si supplier.status == "blocked", excluir
-4. **Precio mínimo:** Si our_price < min_viable_price, excluir
-5. **Región:** Si no envía a la dirección del cliente, excluir
-
-### Ranking final
-
-```python
-def rank_offers(offers, customer_address):
-    filtered = apply_hard_rules(offers, customer_address)
-    
-    for offer in filtered:
-        offer.price_score = calculate_price_score(offer)
-        offer.delivery_score = calculate_delivery_score(offer, customer_address)
-        offer.reliability_score = offer.supplier.reliability_score
-        offer.match_score = offer.product_match.confidence
-        offer.return_score = 1 - offer.supplier.return_rate
-        
-        offer.total_score = (
-            0.50 * offer.price_score +
-            0.20 * offer.delivery_score +
-            0.15 * offer.reliability_score +
-            0.10 * offer.match_score +
-            0.05 * offer.return_score
-        )
-    
-    ranked = sorted(filtered, key=lambda x: x.total_score, reverse=True)
-    
-    # Ensure best price wins unless difference is minimal
-    if len(ranked) > 1:
-        price_diff = ranked[1].final_price - ranked[0].final_price
-        if price_diff > ranked[0].final_price * 0.03:  # >3% difference
-            # Price wins, re-rank by price
-            ranked = sorted(filtered, key=lambda x: x.final_price)
-    
-    return ranked
-```
-
----
-
-## 12. CHECKOUT
-
-### Arquitectura de checkout
-
-```
-Cart → Address → Shipping Options → Tax Calculation → Payment → Confirmation → Order Created → Supplier Purchase
-```
-
-### Guest checkout vs. Cuenta
-
-**MVP:** Guest checkout obligatorio + opción de crear cuenta
-**Versión 2:** Checkout con cuenta opcional
-
-**Por qué guest primero:**
-- Reduce fricción
-- Más rápido de implementar
-- No necesitamos verificar email
-- Los usuarios de TikTok quieren comprar rápido
-
-### Flujo de checkout
+Every offer must include delivery information:
 
 ```typescript
-interface CheckoutRequest {
-  items: CheckoutItem[];
-  shipping_address: Address;
-  payment_method: PaymentMethod;
-  email: string;
-  phone?: string;
-  create_account?: boolean;
-}
-
-interface CheckoutItem {
-  product_id: string;
-  variant_id: string;
-  supplier_product_id: string;
-  quantity: number;
-  // Snapshot de precio al momento de agregar al carrito
-  price_snapshot: {
-    our_price: number;
-    supplier_price: number;
-    shipping_cost: number;
-    tax_amount: number;
-    timestamp: string;
-  };
+interface DeliveryEstimate {
+  min_days: number | null;
+  max_days: number | null;
+  confidence: 'confirmed' | 'estimated' | 'unknown';
+  source: string;  // where this estimate came from
+  shipping_cost: number;
+  shipping_provider: string | null;
+  free_shipping: boolean;
+  ships_from: 'Mexico' | 'China' | 'US' | 'Other' | 'Unknown';
+  tracking_available: boolean;
 }
 ```
 
-### Validaciones de checkout
+### Delivery Confidence
 
-1. **Stock verification:** Reconfirmar stock con proveedor
-2. **Price verification:** Reconfirmar precio (tolerancia de ±2%)
-3. **Address validation:** Validar dirección con API de envío
-4. **Payment validation:** Validar método de pago
-5. **Rate limiting:** Prevenir abuso de checkout
+| Level | Criteria | Example |
+|-------|----------|---------|
+| **Confirmed** | API returns exact delivery date | "Entrega: 28 agosto 2026" |
+| **Estimated (High)** | Platform provides range + historical accuracy >90% | "2-4 días hábiles" |
+| **Estimated (Low)** | Platform provides range or we estimate | "7-21 días" |
+| **Unknown** | No data available | "Tiempo de entrega desconocido" |
 
-### Idempotency
+### Inventory Location Impact
 
-Cada checkout debe ser idempotente:
-```typescript
-// Client genera un checkout_token único
-const checkout_token = generateUUID();
+| Location | Typical Delivery to MX | Cost Impact |
+|----------|----------------------|-------------|
+| Mexico warehouse | 1-3 days | Low shipping |
+| US warehouse | 3-7 days | Medium shipping |
+| China warehouse | 7-21 days | Variable shipping |
+| Unknown | Unknown | Unknown |
 
-// Si el mismo token se envía dos veces, retorna la misma orden
-// Evita doble cobro
-```
+### TikTok Shop Delivery Advantage
 
-### Payment authorization flow
+TikTok Shop often has:
+- Local inventory in Mexico
+- Subsidized shipping
+- 1-2 day delivery on popular items
+- Free shipping promotions
 
-```
-1. Client envía checkout
-2. Server crea order (status: "pending_payment")
-3. Server autoriza pago (no captura aún)
-4. Server compra al proveedor
-5. Si proveedor confirma → capturar pago → status: "confirmed"
-6. Si proveedor falla → cancelar autorización → status: "failed"
-```
-
-### Proveedores de pago para México
-
-| Proveedor | Cuota | Ventajas | Desventajas |
-|-----------|-------|----------|-------------|
-| **Conekta** | 2.9% + $2.50 MXN | Hecho en México, SPEI, OXXO | Menos features internacionales |
-| **Stripe** | 3.6% + $3 MXN | Global, excellent API | Más caro en México |
-| **Mercado Pago** | 3.49% + $0 MXN | Popular en LATAM | Menos control |
-| **OpenPay** | 2.9% + $2.50 MXN | Buena integración | Menos popular |
-
-**Recomendación MVP:** Conekta (mejor relación costo/calidad para México)
-**Alternativa:** Stripe si planeamos expansión LATAM rápida
+**PriceHunt must account for this.** A $399 product with 12-day delivery from China is NOT necessarily better than a $499 product with 1-day delivery from TikTok.
 
 ---
 
-## 13. ORDER ROUTING
+## 12. PriceHunt Ranking Model
 
-### Flujo post-pago
+### Ranking Dimensions
 
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| **Price** | 40% | Landed cost (all-in price) |
+| **Delivery** | 25% | Speed + confidence + cost |
+| **Supplier confidence** | 15% | Supplier reliability score |
+| **Match quality** | 10% | How confident we are it's the same product |
+| **Stock availability** | 10% | Is it actually in stock |
+
+### Ranking Outputs
+
+#### Cheapest
 ```
-Order Confirmed
-  ↓
-Supplier Selection Algorithm
-  ↓
-Purchase Request
-  ↓
-Supplier Confirmation (timeout: 30s-5min)
-  ↓
-  ├─ Confirmed → Update order status → Begin fulfillment
-  └─ Failed → Try next supplier (fallback)
-```
-
-### Algoritmo de selección de proveedor
-
-```python
-def select_supplier(order_item, available_suppliers):
-    scored_suppliers = []
-    
-    for supplier in available_suppliers:
-        score = calculate_supplier_score(
-            supplier,
-            order_item.product,
-            order_item.quantity,
-            order_item.destination
-        )
-        scored_suppliers.append((supplier, score))
-    
-    # Sort by score descending
-    scored_suppliers.sort(key=lambda x: x[1], reverse=True)
-    
-    # Try in order
-    for supplier, score in scored_suppliers:
-        try:
-            result = attempt_purchase(supplier, order_item)
-            if result.success:
-                return supplier, result
-        except SupplierError:
-            continue
-    
-    # All suppliers failed
-    raise AllSuppliersFailedError()
+cheapest_rank = sort by landed_cost ASC
 ```
 
-### Score de proveedor
-
-```python
-def calculate_supplier_score(supplier, product, quantity, destination):
-    # Price (50%)
-    price = get_supplier_price(supplier, product, quantity, destination)
-    price_score = 1 / (1 + price)  # Normalized
-    
-    # Stock availability (20%)
-    stock = check_stock(supplier, product)
-    stock_score = 1.0 if stock > quantity else stock / quantity
-    
-    # Reliability (15%)
-    reliability_score = supplier.success_rate  # Historical
-    
-    # Delivery time (10%)
-    delivery_days = estimate_delivery(supplier, destination)
-    delivery_score = 1 / (1 + delivery_days)
-    
-    # Return rate (5%)
-    return_score = 1 - supplier.return_rate
-    
-    return (
-        0.50 * price_score +
-        0.20 * stock_score +
-        0.15 * reliability_score +
-        0.10 * delivery_score +
-        0.05 * return_score
-    )
+#### Fastest
+```
+fastest_rank = sort by delivery_min_days ASC
+(tiebreak: delivery_confidence DESC)
 ```
 
-### Fallback strategy
+#### Best Overall
+```
+best_score = (
+    0.40 * price_score +
+    0.25 * delivery_score +
+    0.15 * supplier_score +
+    0.10 * match_score +
+    0.10 * stock_score
+)
 
-```python
-FALLBACK_CHAIN = [
-    PrimarySupplier,
-    SecondarySupplier,
-    TertiarySupplier,
-]
-
-# Si el primario falla, intentar secundario
-# Si todos fallan:
-#   1. Notificar al equipo
-#   2. Ofrecer al cliente: reembolso o espera
-#   3. Logging para análisis
+best_overall_rank = sort by best_score DESC
 ```
 
-### Timeout y cancelación
+### Price Score Calculation
 
-- **Timeout de compra:** 5 minutos
-- **Si timeout:** Intentar siguiente proveedor
-- **Si todos fallan:** Cancelar orden, reembolsar automáticamente
-- **Retry policy:** No retry automático (el cliente debe reintentar)
+```
+if no_competitor:
+    price_score = 0.5  // neutral
+
+if competitor_exists:
+    price_score = 1 - (our_price - min_price) / min_price
+    // If we are the cheapest: score = 1.0
+    // If we are 20% more expensive: score = 0.8
+```
+
+### Delivery Score Calculation
+
+```
+delivery_score = (
+    0.5 * speed_score +
+    0.3 * confidence_score +
+    0.2 * cost_score
+)
+
+speed_score = 1 - (delivery_days - 1) / 30
+// 1 day = 1.0, 30 days = 0.0
+
+confidence_score = 1.0 if confirmed
+                 = 0.7 if estimated_high
+                 = 0.4 if estimated_low
+                 = 0.1 if unknown
+```
+
+### When PriceHunt Says "TikTok Wins"
+
+If the TikTok Shop offer has:
+- Best or near-best price (within 5%)
+- Best delivery (fastest)
+- Confirmed stock
+
+Then PriceHunt should display:
+
+> **"TikTok Shop is already a great option for this product."**
+> - Price: $499 MXN (competitive)
+> - Delivery: 1 day (fastest available)
+> - We found alternatives but none are clearly better.
 
 ---
 
-## 14. FULFILLMENT
+## 13. Data Model
 
-### Modelo: Dropshipping puro (MVP)
+### Core Entities
 
-**No mantenemos inventario.** El proveedor cumple directamente.
-
-### Flujo
-
+#### Product (Canonical)
 ```
-Order Confirmed → Supplier Purchase → Supplier Ships → Tracking Updated → Customer Receives
+Product {
+    id: UUID
+    canonical_name: text
+    slug: varchar (unique)
+    brand_id: FK → Brand
+    category_id: FK → Category
+    gtin: varchar (nullable)
+    mpn: varchar (nullable)
+    description: text
+    attributes: jsonb
+    created_at: timestamp
+    updated_at: timestamp
+}
 ```
 
-### Tracking aggregation
-
-Cada proveedor tiene su propio sistema de tracking. Nosotros:
-1. Recibemos número de tracking del proveedor
-2. Consultamos API del carrier (si disponible)
-3. Normalizamos eventos de tracking
-4. Mostramos al cliente en nuestro formato
-
-### State machine de orden
-
+#### ProductVariant
 ```
-pending_payment → pending_supplier → supplier_confirmed → processing → shipped → delivered → completed
-                   ↓                       ↓
-                   ↓                    supplier_failed
-                   ↓                       ↓
-                payment_failed          cancelled → refunded
+ProductVariant {
+    id: UUID
+    product_id: FK → Product
+    sku: varchar
+    name: varchar
+    attributes: jsonb  // color, size, capacity, etc.
+    created_at: timestamp
+}
 ```
+
+#### Source (Platform)
+```
+Source {
+    id: UUID
+    name: varchar
+    slug: varchar (unique)
+    type: varchar  // marketplace, retailer, wholesale, etc.
+    base_url: text
+    adapter_type: varchar  // api, scraping, feed
+    is_active: boolean
+    reliability_score: decimal
+    last_health_check: timestamp
+    health_status: varchar  // healthy, degraded, down
+    config: jsonb
+    created_at: timestamp
+}
+```
+
+#### Supplier (Individual Seller)
+```
+Supplier {
+    id: UUID
+    source_id: FK → Source
+    supplier_id_on_source: varchar  // seller ID on the platform
+    name: varchar
+    is_verified: boolean
+    rating: decimal
+    total_sales: integer
+    return_rate: decimal
+    response_time_ms: integer
+    time_operating_days: integer
+    reliability_score: decimal
+    status: varchar  // verified, established, new, unknown, blocked
+    raw_data: jsonb
+    created_at: timestamp
+    updated_at: timestamp
+}
+```
+
+#### SupplierProduct (Listing)
+```
+SupplierProduct {
+    id: UUID
+    source_id: FK → Source
+    supplier_id: FK → Supplier (nullable)
+    source_product_id: varchar  // product ID on the platform
+    product_id: FK → Product (nullable)  // matched canonical product
+    variant_id: FK → ProductVariant (nullable)
+    match_confidence: decimal
+    match_type: varchar  // exact, strong, similar, weak, invalid
+    title: text
+    images: jsonb
+    raw_data: jsonb
+    last_synced_at: timestamp
+    created_at: timestamp
+    updated_at: timestamp
+}
+```
+
+#### PriceRecord
+```
+PriceRecord {
+    id: UUID
+    supplier_product_id: FK → SupplierProduct
+    price: decimal
+    currency: varchar (3 chars)
+    shipping_cost: decimal
+    shipping_confidence: varchar  // confirmed, estimated, free, unknown
+    tax_amount: decimal
+    import_duties: decimal
+    final_landed_cost: decimal
+    exchange_rate: decimal
+    exchange_rate_timestamp: timestamp
+    in_stock: boolean
+    stock_quantity: integer (nullable)
+    confidence: varchar  // confirmed, estimated, unknown
+    source_url: text
+    captured_at: timestamp
+}
+```
+
+#### DeliveryEstimate
+```
+DeliveryEstimate {
+    id: UUID
+    supplier_product_id: FK → SupplierProduct
+    min_days: integer (nullable)
+    max_days: integer (nullable)
+    confidence: varchar  // confirmed, estimated_high, estimated_low, unknown
+    ships_from: varchar  // Mexico, China, US, Other, Unknown
+    shipping_provider: varchar (nullable)
+    free_shipping: boolean
+    tracking_available: boolean
+    raw_data: jsonb
+    captured_at: timestamp
+}
+```
+
+#### Offer (Calculated)
+```
+Offer {
+    id: UUID
+    product_id: FK → Product
+    variant_id: FK → ProductVariant (nullable)
+    supplier_product_id: FK → SupplierProduct
+    our_price: decimal
+    our_margin: decimal
+    margin_percentage: decimal
+    landed_cost: decimal
+    ranking_cheapest: integer (nullable)
+    ranking_fastest: integer (nullable)
+    ranking_best: integer (nullable)
+    is_best_offer: boolean
+    explanation: jsonb  // price explanation/traceability
+    calculated_at: timestamp
+}
+```
+
+#### PriceExplanation
+```
+PriceExplanation {
+    offer_id: FK → Offer
+    timestamp: varchar
+    source: varchar
+    supplier: varchar
+    product: varchar
+    variant: varchar
+    product_price: decimal
+    shipping: decimal
+    shipping_confidence: varchar
+    tax: decimal
+    import_duties: decimal
+    fees: decimal
+    exchange_rate: decimal
+    exchange_rate_source: varchar
+    final_cost: decimal
+    competitor_price: decimal (nullable)
+    competitor_source: varchar (nullable)
+    our_price: decimal
+    pricing_rule: varchar
+    algorithm_version: varchar
+    match_confidence: decimal
+    match_type: varchar
+}
+```
+
+#### Order + OrderItem + Payment + Shipment
+(Existing schema — keep as-is with minor additions)
+
+### New Entities Needed
+
+| Entity | Purpose | Priority |
+|--------|---------|----------|
+| DeliveryEstimate | Track delivery per listing | P0 |
+| PriceExplanation | Traceability for every price shown | P0 |
+| SourceHealthLog | Track source adapter health | P1 |
+| MatchAuditLog | Track matching decisions for review | P1 |
+| CategoryMapping | Map supplier categories to canonical | P1 |
+| ExchangeRateCache | Cache exchange rates | P1 |
 
 ---
 
-## 15. INFRASTRUCTURE
+## 14. Price Explanation / Traceability
 
-### Análisis de opciones
+### Requirement
 
-#### VPS Tradicionales
+Every price shown to a user must be explainable. If a user asks "why $149.99?", we must be able to answer:
 
-| Proveedor | CPU | RAM | Storage | Bandwidth | Precio/mes | Ventajas |
-|-----------|-----|-----|---------|-----------|------------|----------|
-| **Hetzner** | 2 vCPU | 4GB | 40GB SSD | 20TB | ~$5 | Excelente precio/calidad |
-| **OVH** | 2 vCPU | 4GB | 50GB SSD | Sin límite | ~$7 | Bandwidth ilimitado |
-| **DigitalOcean** | 2 vCPU | 4GB | 80GB SSD | 5TB | ~$24 | Buena DX |
-| **Vultr** | 2 vCPU | 4GB | 50GB SSD | 5TB | ~$24 | Global |
-
-#### Cloud
-
-| Proveedor | Servicio | Precio | Ventajas |
-|-----------|----------|--------|----------|
-| **AWS** | EC2 t3.medium | ~$30/mes | Escalabilidad, servicios managed |
-| **GCP** | e2-medium | ~$25/mes | ML integrado |
-| **Cloudflare** | Workers | $5/mes | Edge computing |
-
-### Recomendación MVP
-
-**Frontend:** Vercel (gratis para hobby, $20/mes para pro)
-**Backend:** Hetzner VPS (€5-10/mes)
-**Database:** Hetzner VPS (mismo o separado)
-**Cache:** Redis en Hetzner
-**Storage:** Cloudflare R2 ($0.015/GB)
-**CDN:** Cloudflare (gratis)
-**Email:** Resend ($20/mes)
-**Monitoring:** Sentry (gratis tier) + Grafana Cloud (gratis)
-
-**Costo total MVP:** ~$50-100/mes
-
-### Evolución por escala
-
-| Usuarios | Infraestructura | Costo/mes |
-|----------|-----------------|-----------|
-| MVP | Hetzner + Vercel + Cloudflare | $50-100 |
-| 10k | Hetzner (upgrade) + Vercel Pro | $150-300 |
-| 100k | AWS/GCP (managed services) | $1,000-2,000 |
-| 1M | AWS/GCP multi-region | $5,000-15,000 |
-| 10M | Multi-cloud, CDN global | $20,000-50,000 |
-
----
-
-## 16. VPS / SERVERS
-
-### Topología inicial (MVP)
-
-```
-                    Cloudflare (CDN + DNS)
-                           │
-                    ┌──────▼──────┐
-                    │   Vercel    │
-                    │  (Frontend) │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │   Hetzner   │
-                    │   VPS #1    │
-                    │  (Backend)  │
-                    │  4 vCPU     │
-                    │  8GB RAM    │
-                    │  80GB SSD   │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-        ┌─────▼─────┐ ┌───▼───┐ ┌─────▼─────┐
-        │ PostgreSQL │ │ Redis │ │ BullMQ    │
-        │   (DB #1)  │ │(Cache)│ │ (Workers) │
-        └───────────┘ └───────┘ └───────────┘
-```
-
-### MVP (1-2 servidores)
-
-| Servidor | CPU | RAM | Storage | Propósito |
-|----------|-----|-----|---------|-----------|
-| **App Server** | 4 vCPU | 8GB | 80GB SSD | Backend + Workers + Redis |
-| **DB Server** | 2 vCPU | 4GB | 160GB SSD | PostgreSQL |
-
-**Costo:** ~$20-30/mes en Hetzner
-
-### Producción temprana (10k usuarios)
-
-| Servidor | CPU | RAM | Storage | Propósito |
-|----------|-----|-----|---------|-----------|
-| **App #1** | 4 vCPU | 8GB | 80GB SSD | API + Web |
-| **App #2** | 4 vCPU | 8GB | 80GB SSD | Workers |
-| **DB Primary** | 4 vCPU | 16GB | 320GB SSD | PostgreSQL primary |
-| **DB Replica** | 2 vCPU | 8GB | 160GB SSD | PostgreSQL read replica |
-| **Redis** | 2 vCPU | 4GB | 40GB SSD | Cache + Queue |
-
-**Costo:** ~$100-150/mes
-
-### 100k usuarios
-
-| Servidor | CPU | RAM | Storage | Propósito |
-|----------|-----|-----|---------|-----------|
-| **Load Balancer** | 2 vCPU | 4GB | - | Nginx/HAProxy |
-| **App (2-4)** | 4 vCPU | 8GB | 80GB SSD | Backend horizontal |
-| **Workers (2)** | 4 vCPU | 16GB | 80GB SSD | Crawler + Pricing |
-| **DB Primary** | 8 vCPU | 32GB | 640GB SSD | PostgreSQL |
-| **DB Replica (2)** | 4 vCPU | 16GB | 320GB SSD | Read replicas |
-| **Redis Cluster** | 4 vCPU | 8GB | 80GB SSD | Cache + Queue |
-| **Search** | 4 vCPU | 8GB | 160GB SSD | Meilisearch |
-
-**Costo:** ~$500-1,000/mes
-
-### 1M usuarios
-
-Migrar a AWS/GCP con:
-- ECS/EKS para containers
-- RDS para PostgreSQL
-- ElastiCache para Redis
-- OpenSearch para búsqueda
-- S3 para storage
-- CloudFront para CDN
-
-**Costo:** ~$3,000-8,000/mes
-
----
-
-## 17. SCRAPING / CRAWLING
-
-### Arquitectura (solo fuentes permitidas)
-
-```
-Scheduler (BullMQ)
-  ↓
-URL Queue
-  ↓
-Worker Pool (concurrency limit per domain)
-  ↓
-HTTP Client (con rate limiting)
-  ↓
-Parser (versioned per domain)
-  ↓
-Data Validator
-  ↓
-Normalization Pipeline
-  ↓
-Storage
-```
-
-### Políticas por dominio
-
-```typescript
-const domainPolicies = {
-  "aliexpress.com": {
-    allowed: true,
-    rateLimit: "10 requests/minute",
-    robotsTxt: "check",
-    tos: "review required",
-    method: "official_api_preferred"
-  },
-  "amazon.com.mx": {
-    allowed: true,
-    rateLimit: "1 request/second",
-    robotsTxt: "check",
-    tos: "paapi_only",
-    method: "official_api"
-  },
-  "mercadolibre.com.mx": {
-    allowed: true,
-    rateLimit: "unlimited_with_api_key",
-    robotsTxt: "check",
-    tos: "api_allowed",
-    method: "official_api"
-  }
-};
-```
-
-### Rate limiting
-
-```python
-class RateLimiter:
-    def __init__(self):
-        self.redis = Redis()
-    
-    async def acquire(self, domain: str) -> bool:
-        key = f"rate_limit:{domain}"
-        current = await self.redis.incr(key)
-        if current == 1:
-            await self.redis.expire(key, 60)  # 1 minute window
-        
-        limit = get_domain_limit(domain)
-        return current <= limit
-```
-
-### Proxy strategy
-
-**NO usar proxies para evadir restricciones.** Solo usar proxies si:
-- El sitio lo permite explícitamente
-- Tenemos acuerdo comercial
-- Es necesario para geolocalización (precios regionales)
-
-### Change detection
-
-```python
-async def detect_changes(supplier_product_id: str, new_data: dict):
-    current = await db.get(supplier_product_id)
-    
-    changes = {
-        "price_changed": current.price != new_data.price,
-        "stock_changed": current.in_stock != new_data.in_stock,
-        "description_changed": current.description != new_data.description
-    }
-    
-    if any(changes.values()):
-        await emit_event("product.changed", {
-            "supplier_product_id": supplier_product_id,
-            "changes": changes,
-            "old": current,
-            "new": new_data
-        })
-```
-
----
-
-## 18. SEARCH
-
-### Búsqueda por tipo
-
-| Tipo | Implementación MVP | Evolución |
-|------|-------------------|-----------|
-| **Texto** | PostgreSQL full-text | Meilisearch |
-| **URL** | Redirect/parse | Direct matching |
-| **Imagen** | No MVP | CLIP + vector DB |
-| **SKU** | PostgreSQL exact match | Meilisearch |
-| **Marca** | PostgreSQL filter | Meilisearch facet |
-| **Categoría** | PostgreSQL filter | Meilisearch facet |
-
-### Recomendación
-
-**MVP:** PostgreSQL full-text search
-- Funciona bien hasta 100k productos
-- Sin infraestructura adicional
-- Full-text search + trigram similarity
-
-**100k+ productos:** Meilisearch
-- Más rápido que PostgreSQL para búsquedas complejas
-- Facetas integradas
-- Typo tolerance
-- Self-hosted (Hetzner)
-
-**1M+ productos:** Meilisearch cluster o Elasticsearch
-
-### Schema Meilisearch
+### Explanation Fields
 
 ```json
 {
-  "uid": "products",
-  "primaryKey": "id",
-  "fields": [
-    "title",
-    "description",
-    "brand",
-    "category",
-    "sku",
-    "price",
-    "rating"
-  ],
-  "filterableAttributes": [
-    "brand",
-    "category",
-    "price_range",
-    "in_stock"
-  ],
-  "sortableAttributes": [
-    "price",
-    "rating",
-    "created_at"
-  ]
+  "timestamp": "2026-08-29T14:32:00Z",
+  "source": "aliexpress",
+  "source_url": "https://aliexpress.com/item/1005008039213625.html",
+  "supplier": "Shenzhen TechStore Co.",
+  "supplier_verified": true,
+  "supplier_rating": 4.8,
+  "product": "iPhone 15 Silicone Case",
+  "variant": "Black / Medium",
+  "product_price_usd": 8.50,
+  "product_price_mxn": 145.78,
+  "shipping_cost_mxn": 45.00,
+  "shipping_confidence": "estimated",
+  "shipping_source": "AliExpress standard calculator",
+  "tax_amount_mxn": 30.53,
+  "import_duties_mxn": 0,
+  "exchange_rate": 17.15,
+  "exchange_rate_source": "Banxico",
+  "exchange_rate_timestamp": "2026-08-29T00:00:00Z",
+  "final_landed_cost_mxn": 221.31,
+  "our_price_mxn": 229.99,
+  "our_margin_mxn": 8.68,
+  "our_margin_percentage": 3.77,
+  "pricing_rule": "minimum_margin",
+  "match_confidence": 0.92,
+  "match_type": "strong",
+  "match_evidence": ["title_85%", "brand_match", "price_range_close"],
+  "algorithm_version": "1.0.0"
 }
 ```
 
----
+### Storage
 
-## 19. AI / ML
-
-### Dónde AI aporta valor
-
-| Caso | Solución | MVP | Evolución |
-|------|----------|-----|-----------|
-| **Extracción de atributos** | LLM (GPT-4) | ✅ | Fine-tuned model |
-| **Clasificación de categoría** | Embeddings + classifier | ✅ | Custom model |
-| **Product matching** | Multimodal embeddings | ✅ | Custom model |
-| **Image understanding** | CLIP / GPT-4V | ✅ | Custom model |
-| **OCR** | Tesseract / cloud OCR | ✅ | Custom model |
-| **Normalización de texto** | Reglas + LLM fallback | ✅ | Custom model |
-| **Detección de fraude** | Reglas + ML | ❌ | Phase 3 |
-
-### Dónde NO usar AI
-
-| Caso | Mejor solución |
-|------|----------------|
-| **Cálculo de precio** | Reglas determinísticas |
-| **Cálculo de impuestos** | Tablas + reglas |
-| **Cálculo de envío** | APIs de carriers |
-| **Checkout flow** | Lógica determinística |
-| **Order routing** | Reglas + scoring |
-
-### Arquitectura híbrida
-
-```
-Rules Engine (deterministic)
-  ↓ (if confidence < threshold)
-ML Model (classical)
-  ↓ (if confidence < threshold)
-Embeddings (semantic)
-  ↓ (if confidence < threshold)
-LLM (expensive, last resort)
-```
-
-### Costo de AI
-
-| Servicio | Uso | Costo estimado |
-|----------|-----|----------------|
-| **OpenAI GPT-4** | Extracción de atributos | ~$0.01-0.03/producto |
-| **OpenAI CLIP** | Image matching | ~$0.001/imagen |
-| **OpenAI embeddings** | Text similarity | ~$0.0001/texto |
-
-**Costo total estimado MVP:** ~$50-200/mes
+Each `Offer` row must include a `PriceExplanation` JSONB field. This allows:
+- Debugging pricing decisions
+- Answering customer questions
+- Auditing algorithm behavior
+- Identifying systematic errors
 
 ---
 
-## 20. SECURITY
+## 15. Phase 0 — Redefined
 
-### Checklist de seguridad
+### Objective
 
-#### Secrets Management
-- [ ] Usar Vault o SOPS para secrets
-- [ ] Nunca hardcodear API keys
-- [ ] Rotación automática de secrets
-- [ ] Secrets por ambiente (dev/staging/prod)
+> **Can we build a product that finds real better deals, legally and operationally?**
 
-#### Payment Security
-- [ ] No almacenar datos de tarjetas (usar tokenización)
-- [ ] PCI DSS compliance a través del payment provider
-- [ ] Validación de webhooks con firmas
-- [ ] Idempotency en transacciones
+### Scope
 
-#### API Security
-- [ ] Rate limiting por IP y por usuario
-- [ ] JWT con expiración corta
-- [ ] CORS configurado correctamente
-- [ ] Input validation en todos los endpoints
-- [ ] SQL injection prevention (ORM parameterized queries)
-- [ ] XSS prevention (sanitize output)
+Phase 0 is NOT "research APIs." Phase 0 is a structured validation of 16 hypotheses.
 
-#### Data Security
-- [ ] Encryption at rest (AES-256)
-- [ ] Encryption in transit (TLS 1.3)
-- [ ] PII encryption (email, phone)
-- [ ] Data retention policies
-- [ ] Right to deletion (GDPR-like)
+### Hypotheses
 
-#### Infrastructure Security
-- [ ] SSH key-only authentication
-- [ ] Firewall configurado
-- [ ] Fail2ban activo
-- [ ] Regular security updates
-- [ ] Backup encryption
+| # | Hypothesis | How to Validate |
+|---|------------|-----------------|
+| H1 | Users want to check if TikTok Shop prices are the best | Survey + landing page experiment |
+| H2 | We can identify products from TikTok URLs | Build parser, test on 100 URLs |
+| H3 | We can find matching products on other sources | Test on 100 products |
+| H4 | We can get real prices from AliExpress, Amazon, ML | Test adapters on 50 products |
+| H5 | Landed cost comparison is meaningful | Compare 50 products with full cost |
+| H6 | Delivery data is available from sources | Check API/scraping feasibility |
+| H7 | PriceHunt can beat TikTok Shop price ≥20% of the time | Run full experiment on 200 products |
+| H8 | When PriceHunt wins, savings are meaningful (≥10%) | Measure average savings |
+| H9 | When TikTok wins, we can honestly say so | Test UX for "TikTok is best" result |
+| H10 | Supplier reliability data is available | Check platform APIs |
+| H11 | Legal/ToS compliance is achievable | Audit each source |
+| H12 | Margins are sustainable (≥2% average) | Calculate on 200 products |
+| H13 | Categories with highest opportunity can be identified | Classify by category |
+| H14 | Matching accuracy ≥90% is achievable | Manual verification |
+| H15 | Users will trust PriceHunt even when it says "TikTok wins" | User testing |
+| H16 | The product can operate legally in Mexico | Legal review |
 
-#### Application Security
-- [ ] Dependency scanning (npm audit, Snyk)
-- [ ] Container scanning (si usamos Docker)
-- [ ] SAST (static analysis)
-- [ ] CSRF protection
-- [ ] Content Security Policy headers
+### Experiments
 
-### Autenticación
+#### Experiment 1: TikTok Product Extraction (1 week)
+- Collect 100 real TikTok Shop URLs
+- Test URL parser + product extraction
+- Measure: % success, data completeness
 
-**MVP:** JWT + refresh tokens
-**Versión 2:** OAuth2 + possible SSO
+#### Experiment 2: Cross-Source Matching (2 weeks)
+- For 100 TikTok products, search across AliExpress, Amazon, ML
+- Measure: % matches found, match confidence, manual verification
 
-```typescript
-// Token structure
-interface AccessToken {
-  sub: string;        // user_id
-  email: string;
-  role: 'user' | 'admin';
-  iat: number;
-  exp: number;        // 15 minutes
-}
+#### Experiment 3: Full Landed Cost Comparison (2 weeks)
+- For 200 products, calculate full landed cost from each source
+- Compare with TikTok Shop price + delivery
+- Measure: % where PriceHunt wins, average savings
 
-interface RefreshToken {
-  sub: string;
-  iat: number;
-  exp: number;        // 7 days
-  family: string;     // Token family for rotation
-}
-```
+#### Experiment 4: Supplier Reliability (1 week)
+- For matched products, evaluate supplier reliability
+- Check: verification, ratings, return rates
+- Measure: % of matches from reliable suppliers
+
+#### Experiment 5: Legal Audit (1 week)
+- Review ToS of each source
+- Document: what's allowed, what's not
+- Decision: which sources to include/exclude
+
+### Metrics
+
+| Metric | Target | Minimum |
+|--------|--------|---------|
+| Product extraction success | >80% | >60% |
+| Match found | >70% | >50% |
+| Match accuracy (manual) | >90% | >80% |
+| PriceHunt wins ≥20% cheaper | >30% of products | >20% |
+| Average savings when we win | >15% | >10% |
+| TikTok wins (honest result) | Reported honestly | — |
+| Landed cost calculable | >80% | >60% |
+| Delivery data available | >60% | >40% |
+| Legal compliance | 100% | 100% |
+
+### Success Criteria
+
+Phase 0 is successful if:
+1. We can extract product data from TikTok URLs (>60% success)
+2. We can find matches on other sources (>50% of products)
+3. When we find matches, they are accurate (>80%)
+4. PriceHunt beats TikTok price on ≥20% of products
+5. When we win, savings average ≥10%
+6. Legal compliance is confirmed for all included sources
+7. We can identify which categories have highest opportunity
+
+### Failure Criteria
+
+Phase 0 fails if:
+1. Product extraction success <50%
+2. Match rate <30%
+3. Match accuracy <70%
+4. PriceHunt never beats TikTok by >5%
+5. Legal blockers for major sources
+6. Landed cost comparison is unreliable
+
+### Pivot Conditions
+
+If Phase 0 fails:
+- **Low extraction:** Pivot to text/image search instead of URL
+- **Low matching:** Narrow to categories with better data (GTIN-rich)
+- **No price advantage:** Pivot to "delivery comparison" instead of price
+- **Legal issues:** Pivot to only API-authorized sources
 
 ---
 
-## 21. OBSERVABILITY
+## 16. MVP Experimental
 
-### Three pillars
+### Objective
 
-#### Logs
-- **Framework:** Pino (structured JSON logging)
-- **Transport:** stdout → file → aggregation service
-- **Levels:** error, warn, info, debug
-- **Context:** request_id, user_id, timestamp
+> **Demonstrate that people want to use PriceHunt.**
+
+### What It Is
+
+A single-page web app:
+1. Input field for TikTok URL
+2. Button: "Find better price"
+3. Loading state (3-5 seconds)
+4. Result: "We found X% cheaper" OR "TikTok Shop is already the best option"
+5. If interested: email capture for launch notification
+6. If not: show current price and brief explanation
+
+### What It Is NOT
+
+- No checkout
+- No real orders
+- No supplier integration
+- No payment processing
+- No user accounts
+
+### Stack
+
+- Next.js (Vercel)
+- Serverless functions (Vercel)
+- Supabase (database, free tier)
+- OpenAI API (product identification)
+- No real supplier connections
+
+### What We Validate
+
+1. Do people paste TikTok URLs?
+2. What products do they search for?
+3. What percentage want to buy?
+4. Where do they come from (traffic source)?
+5. What categories are most popular?
+
+### Metrics
+
+| Metric | Target | Timeframe |
+|--------|--------|-----------|
+| URLs pasted | >100 | 2 weeks |
+| Email captures | >30% of users | 2 weeks |
+| Return visitors | >20% | 2 weeks |
+| Social shares | >10 | 2 weeks |
+
+### Timeline
+
+**2-4 weeks** with 1 developer.
+
+---
+
+## 17. MVP Real
+
+### Objective
+
+> **Enable real transactions. Users can actually buy products through PriceHunt.**
+
+### What It Has
+
+1. Product identification from URL
+2. Search across 3+ sources (AliExpress, Amazon, ML)
+3. Landed cost calculation
+4. Delivery estimation
+5. Ranking (Cheapest / Fastest / Best)
+6. Price explanation/traceability
+7. Checkout with Conekta
+8. Order management
+9. Supplier purchase (semi-automated)
+10. Basic tracking
+
+### What It Doesn't Have
+
+- Image search
+- Browser extension
+- Native mobile app
+- Admin panel (manual DB management)
+- Advanced analytics
+- Multiple suppliers per order
+- Affiliate system
+- Referral system
+
+### Stack
+
+- Next.js (Vercel)
+- Fastify (Hetzner VPS)
+- PostgreSQL (Hetzner VPS)
+- Redis (Hetzner VPS)
+- BullMQ (Hetzner VPS)
+- Meilisearch (Hetzner VPS)
+- Conekta (payments)
+- Resend (email)
+
+### Timeline
+
+**8-12 weeks** with 1-2 developers.
+
+---
+
+## 18. Validation Experiments
+
+### Main Experiment: TikTok Product Analysis (200 Products)
+
+#### Setup
+
+1. Collect 200 real TikTok Shop products (across 10 categories)
+2. For each product:
+   - Extract product data (title, price, delivery, images)
+   - Search across AliExpress, Amazon, MercadoLibre, eBay
+   - Find matches (if any)
+   - Calculate landed cost for each match
+   - Estimate delivery for each match
+   - Evaluate supplier reliability
+   - Compare with TikTok Shop
 
 #### Metrics
-- **Framework:** Prometheus + Grafana
-- **Types:** Counter, Gauge, Histogram
-- **Scrape interval:** 15 seconds
 
-#### Traces
-- **Framework:** OpenTelemetry
-- **Sampling:** 1% in production, 100% in development
-
-### Métricas de negocio
-
-| Métrica | Tipo | Descripción |
-|---------|------|-------------|
-| `searches_per_day` | Counter | Búsquedas diarias |
-| `products_identified` | Counter | Productos identificados |
-| `matches_found` | Counter | Matches encontrados |
-| `conversion_rate` | Gauge | Tasa de conversión |
-| `average_savings` | Histogram | Ahorro promedio |
-| `best_offer_rate` | Gauge | % de veces que somos la mejor oferta |
-| `average_margin` | Gauge | Margen promedio |
-| `zero_margin_orders` | Counter | Órdenes con margen 0 |
-| `negative_margin_orders` | Counter | Órdenes con margen negativo |
-| `order_success_rate` | Gauge | % de órdenes completadas |
-| `supplier_failure_rate` | Gauge | % de fallos por proveedor |
-| `refund_rate` | Gauge | % de reembolsos |
-
-### Métricas técnicas
-
-| Métrica | Tipo | Alerta si |
-|---------|------|-----------|
-| `api_latency_p99` | Histogram | > 500ms |
-| `queue_latency` | Histogram | > 10s |
-| `db_latency_p99` | Histogram | > 100ms |
-| `crawler_success_rate` | Gauge | < 90% |
-| `stale_prices` | Gauge | > 10% |
-| `matching_confidence_avg` | Gauge | < 0.8 |
-| `cache_hit_rate` | Gauge | < 80% |
-
-### Alertas críticas
-
-```yaml
-alerts:
-  - name: high_error_rate
-    condition: rate(http_requests_total{status="5xx"}[5m]) > 0.05
-    severity: critical
-    action: page on-call
-    
-  - name: price_staleness
-    condition: stale_prices > 0.2
-    severity: warning
-    action: notify slack
-    
-  - name: supplier_down
-    condition: supplier_success_rate < 0.5 for 10m
-    severity: warning
-    action: notify slack + email
-    
-  - name: payment_failure
-    condition: payment_failure_rate > 0.1
-    severity: critical
-    action: page on-call
 ```
+For each product:
+  - extraction_success: boolean
+  - match_found: boolean
+  - match_type: exact | strong | similar | weak | invalid
+  - match_confidence: 0.0 - 1.0
+  
+  For each match:
+    - landed_cost: number
+    - delivery_days: number
+    - delivery_confidence: confirmed | estimated | unknown
+    - supplier_score: 0.0 - 1.0
+    - savings_vs_tiktok: number (negative = TikTok cheaper)
+    - savings_percentage: number
+
+Aggregate:
+  - % products with extraction success
+  - % products with match found
+  - % products with exact/strong match
+  - % products where PriceHunt is cheaper
+  - % products where PriceHunt is ≥5% cheaper
+  - % products where PriceHunt is ≥10% cheaper
+  - % products where PriceHunt is ≥20% cheaper
+  - Average savings when PriceHunt wins
+  - Median savings when PriceHunt wins
+  - % products where TikTok is better
+  - % products where TikTok wins on delivery
+  - % products with known shipping cost
+  - % products with known delivery time
+  - % matches with high confidence
+  - % matches manually verified as correct
+```
+
+#### Category Breakdown
+
+For each category, calculate:
+- PriceHunt win rate
+- Average savings
+- Delivery comparison
+- Match quality
+
+#### Expected Output
+
+A spreadsheet with:
+- 200 rows (one per product)
+- Columns for all metrics above
+- Summary statistics
+- Category breakdown
+- Recommendations
 
 ---
 
-## 22. ADMIN PANEL
+## 19. Metrics / KPIs
 
-### Funcionalidades
+### North Star
 
-#### Dashboard
-- Métricas en tiempo real (ventas, órdenes, margen)
-- Alertas activas
-- Supplier health status
-
-#### Gestión de productos
-- Ver productos y variantes
-- Ver matches por producto
-- Revisar/market manual de matches
-- Bloquear productos específicos
-
-#### Gestión de proveedores
-- Ver lista de proveedores
-- Ver métricas de cada proveedor
-- Activar/desactivar proveedores
-- Configurar rate limits
-
-#### Gestión de precios
-- Ver historial de precios
-- Configurar reglas de pricing
-- Override manual de precios
-- Ver márgenes por categoría
-
-#### Gestión de órdenes
-- Ver todas las órdenes
-- Filtrar por estado
-- Ver detalles de orden
-- Procesar reembolsos manualmente
-- Reintentar órdenes fallidas
-
-#### Gestión de usuarios
-- Ver usuarios
-- Ver historial de compras
-- Ban usuarios abusivos
-
-### Stack para admin
-
-**MVP:** Next.js admin (parte de la misma app)
-**Versión 2:** Considerar Retool o admin custom
-
----
-
-## 23. DATA / ANALYTICS
-
-### Data pipeline
-
+**Customer Savings Score (CSS)**
 ```
-Events → Kafka/BullMQ → Transform → Store → Analyze → Visualize
+CSS = 0.4 * BestOfferRate + 0.3 * AverageSavings + 0.2 * MatchAccuracy + 0.1 * FulfillmentSuccess
 ```
 
-### Métricas a trackear
+### Business Metrics
 
-#### Comportamiento de usuario
-- Qué productos buscan
-- Qué productos compran
-- Desde dónde llegan (TikTok, direct, etc.)
-- Tasa de conversión por fuente
-- Abandono de carrito
+| Metric | Description | Target |
+|--------|-------------|--------|
+| Best Offer Rate | % of products where we find a better deal | >30% |
+| Average Savings | Average % savings when we win | >10% |
+| Match Accuracy | % of matches that are correct | >90% |
+| Fulfillment Success | % of orders completed successfully | >95% |
+| Conversion Rate | % of searches that lead to purchase | >5% |
+| Revenue per Search | Average revenue per product search | >$10 MXN |
+| Customer Return Rate | % of users who return within 30 days | >20% |
 
-#### Performance del sistema
-- Dónde encontramos mejores precios
-- Qué proveedores son mejores
-- Qué categorías tienen mayor margen
-- Qué productos generan pérdida
-- Dónde fallan los matches
-- Dónde fallan proveedores
+### Technical Metrics
 
-#### Feedback loop
+| Metric | Description | Target |
+|--------|-------------|--------|
+| API Latency (p99) | 99th percentile response time | <500ms |
+| Extraction Success Rate | % of URLs successfully parsed | >80% |
+| Source Uptime | % of time sources are accessible | >95% |
+| Price Freshness | Average age of price data | <24 hours |
+| Cache Hit Rate | % of requests served from cache | >70% |
+| Worker Queue Depth | Average jobs waiting | <100 |
+| Error Rate | % of requests resulting in error | <1% |
 
-```
-Data collected → Insights → Algorithm improvements → Better prices → More conversions → More data
-```
+### Experiment Metrics
 
-### Herramientas
-
-| Herramienta | Uso | Costo |
-|-------------|-----|-------|
-| **PostgreSQL** | Almacenamiento principal | $0 (self-hosted) |
-| **Grafana** | Dashboards | $0 (Cloud free tier) |
-| **Prometheus** | Métricas | $0 (self-hosted) |
-| **Sentry** | Error tracking | $0 (free tier) |
-| **Resend** | Email analytics | $20/mes |
-
----
-
-## 24. EXPERIMENTATION
-
-### A/B Testing framework
-
-```typescript
-interface Experiment {
-  id: string;
-  name: string;
-  variants: Variant[];
-  traffic_split: number[];  // e.g., [50, 50]
-  start_date: Date;
-  end_date: Date;
-  metrics: string[];
-  guardrails: string[];  // Metrics that must not degrade
-}
-
-interface Variant {
-  id: string;
-  name: string;
-  config: Record<string, any>;
-}
-```
-
-### Qué experimentar
-
-| Área | Ejemplo | Métrica |
-|------|---------|---------|
-| **Precio** | $102 vs $99.99 | Conversion rate |
-| **UI** | Botón verde vs azul | Click rate |
-| **Savings messaging** | "Ahorra $6" vs "12% menos" | Conversion rate |
-| **Checkout** | 3 pasos vs 1 paso | Completion rate |
-| **Shipping** | "Envío gratis" vs "$4.99" | Conversion rate |
-
-### Guardrails (nunca violar)
-
-1. **No engañar sobre precio:** El precio mostrado debe ser el real
-2. **No margen negativo accidental:** Alerta si margen < 0 sin explícito flag
-3. **No degradar UX:** Si métrica de UX cae >5%, detener experimento
-4. **No sacrificar confiabilidad:** Si tasa de error sube >1%, detener
-
----
-
-## 25. BUSINESS MODEL
-
-### Modelos compatibles con nuestra filosofía
-
-| Modelo | Descripción | Compatibilidad |
+| Metric | Description | Phase 0 Target |
 |--------|-------------|----------------|
-| **1. Margen por transacción** | X% por cada venta | ✅ Compatibe si es bajo |
-| **2. Afiliación** | Comisión de proveedores | ✅ Ideal (no afecta precio) |
-| **3. Supplier commission** | Proveedor nos pone comisión | ✅ Compatible |
-| **4. Direct supplier deals** | Acuerdos directos | ✅ Ideal (mejores precios) |
-| **5. Advertising** | Productos patrocinados | ⚠️ Con restricciones |
-| **6. Premium membership** | Features extra | ⚠️ No bloquear features básicas |
-| **7. Sponsored products** | Productos destacados | ⚠️ Solo si son realmente ofertas |
-
-### Modelo recomendado (fase inicial)
-
-**Primario:** Margen por transacción (3-5%)
-**Secundario:** Programas de afiliados (comisión de proveedores)
-**Terciario:** (Futuro) Acuerdos directos con proveedores
-
-### Por qué este modelo
-
-1. **Margen bajo pero escalable:** 3% de $100 = $3. A 1000 órdenes = $3,000
-2. **Afiliados son gratis:** El proveedor paga comisión, no el usuario
-3. **Escalable:** Más volumen = más margen total
-4. **Competitivo:** Podemos ofrecer los mejores precios
-
-### Ingresos proyectados (ejemplo)
-
-| Usuarios | Órdenes/mes | Ticket promedio | Ingreso mensual |
-|----------|-------------|-----------------|-----------------|
-| MVP | 100 | $500 MXN | $1,500 MXN |
-| 10k | 1,000 | $500 MXN | $15,000 MXN |
-| 100k | 10,000 | $500 MXN | $150,000 MXN |
-| 1M | 100,000 | $500 MXN | $1,500,000 MXN |
-
-*(Asumiendo 3% de margen promedio)*
+| PriceHunt Win Rate | % where we beat TikTok | >20% |
+| Savings Magnitude | Average savings when we win | >10% |
+| TikTok Win Rate | % where TikTok is better | Measured honestly |
+| Match Rate | % of products with valid match | >50% |
+| Delivery Data Availability | % with known delivery | >60% |
 
 ---
 
-## 26. LEGAL / COMPLIANCE
+## 20. Success Criteria
 
-### Preguntas que DEBEN validarse con abogados/contadores
+### Phase 0 Success
 
-#### Ecommerce
-1. **¿Necesitamos constituir empresa en México?** Sí, para facturar
-2. **¿Qué tipo de sociedad?** (SA de CV, SRL, etc.)
-3. **¿Necesitamos registro ante PROFECO?** Probablemente sí
+- [ ] Product extraction from TikTok URLs: >60% success
+- [ ] Cross-source matching: >50% of products matched
+- [ ] Match accuracy: >80% (manual verification)
+- [ ] PriceHunt beats TikTok: ≥20% of products
+- [ ] Average savings when winning: ≥10%
+- [ ] Legal compliance confirmed for all sources
+- [ ] Category opportunity analysis complete
 
-#### Consumidor
-4. **¿Cuáles son nuestras obligaciones como vendedor?** Ley Federal de Protección al Consumidor
-5. **¿Debemos ofrecer garantía?** Sí, mínimo 90 días por ley
-6. **¿Política de devoluciones?** Mínimo 5 días hábiles
+### MVP Experimental Success
 
-#### Facturación
-7. **¿Necesitamos emitir CFDI?** Sí, obligatorio
-8. **¿Necesitamos contabilidad electrónica?** Sí
-9. **¿Retenciones de IVA?** Depende del régimen fiscal
+- [ ] 100+ URLs pasted in 2 weeks
+- [ ] 30%+ email capture rate
+- [ ] 3+ popular categories identified
+- [ ] Positive user feedback
 
-#### Importaciones
-10. **¿Necesitamos pedimento de importación?** Depende del valor y frecuencia
-11. **¿Quién paga aranceles?** Definir si DDP o DDU
-12. **¿IVA en importaciones?** 16% generalmente
+### MVP Real Success
 
-#### Uso de datos de otros sitios
-13. **¿Podemos usar imágenes de TikTok?** Revisar ToS de TikTok
-14. **¿Podemos usar datos de Amazon?** Solo vía API oficial
-15. **¿Scraping permitido?** Depende del sitio
-
-#### Scraping
-16. **¿Es legal el scraping en México?** No hay ley explícita, pero hay riesgos
-17. **¿Robots.txt es legally binding?** No en México, pero es buena práctica
-18. **¿Qué dice cada ToS?** Revisar caso por caso
-
-#### Pagos
-19. **¿Necesitamos licencia para manejar pagos?** No si usamos provider externo
-20. **¿Ley Fintech aplica?** No si no retenemos fondos
-
-#### Publicidad
-21. **¿Podemos decir "el más barato"?** Solo si podemos probarlo
-22. **¿Precios comparativos?** Revisar regulaciones de PROFECO
-23. **¿Publicidad engañosa?** Revisar con abogado
+- [ ] 100 orders completed
+- [ ] 70%+ customer satisfaction
+- [ ] Average margin >2%
+- [ ] 0 critical errors
+- [ ] Fulfillment success >90%
 
 ---
 
-## 27. MÉTRICA PRINCIPAL (NORTH STAR)
+## 21. Failure Criteria
 
-### Propuesta: Customer Savings Score
+### Phase 0 Failure
 
-```
-Customer Savings Score = 
-  (Reference Price - Our Price) / Reference Price * 100
-```
+| Condition | Action |
+|-----------|--------|
+| Extraction success <50% | Pivot to text/image search |
+| Match rate <30% | Narrow to GTIN-rich categories |
+| PriceHunt never wins >5% | Pivot to delivery comparison |
+| Legal blockers for major sources | Restrict to authorized sources only |
+| Landed cost unreliable | Simplify to product price only |
 
-Donde:
-- **Reference Price:** El precio más bajo verificable que encontramos en otras fuentes
-- **Our Price:** Nuestro precio al usuario
+### MVP Failure
 
-### Métricas de soporte
-
-| Métrica | Descripción | Target |
-|---------|-------------|--------|
-| **Best Offer Rate** | % de productos donde somos los más baratos | > 70% |
-| **Average Savings** | Ahorro promedio vs referencia | > 5% |
-| **Price Advantage** | Diferencia porcentual vs mejor alternativa | < -2% |
-| **Match Accuracy** | % de matches correctos | > 95% |
-| **Fulfillment Success** | % de órdenes completadas | > 98% |
-| **Contribution Margin** | Margen después de costos | > 2% |
-
-### Combinación correcta
-
-**North Star:** Customer Savings Score (ponderado)
-```
-NSS = 0.4 * BestOfferRate + 0.3 * AverageSavings + 0.2 * MatchAccuracy + 0.1 * FulfillmentSuccess
-```
-
-**Razón:** Priorizamos que el usuario ahorre (BestOfferRate + AverageSavings), que el matching sea correcto (MatchAccuracy), y que la orden se cumpla (FulfillmentSuccess).
+| Condition | Action |
+|-----------|--------|
+| <10 orders in first month | Investigate: product, marketing, pricing |
+| Average margin <0% | Adjust pricing strategy |
+| Fulfillment success <80% | Review supplier reliability |
+| Customer satisfaction <50% | Major UX/product review |
 
 ---
 
-## 28. FAILURE MODES
+## 22. Risk Matrix
 
-### Análisis de fallos
-
-| Fallo | Detección | Prevención | Fallback | Recuperación |
-|-------|-----------|------------|----------|--------------|
-| **Precio desactualizado** | Verify price before checkout | Cache TTL corto (5-15 min) | Reject if >5% change | Re-crawl |
-| **Proveedor sin stock** | Stock check before purchase | Verify stock at checkout | Try next supplier | Notify user |
-| **Producto diferente** | Match confidence check | Strict matching rules | Don't offer if low confidence | Manual review |
-| **Shipping inesperado** | Calculate at checkout | Real-time shipping API | Show estimated range | Refund if >20% diff |
-| **Impuesto inesperado** | Tax calculation at checkout | Tax database | Conservative estimate | Absorb difference |
-| **Proveedor cancela** | Supplier confirmation timeout | Require confirmation | Auto-refund + notify | Escalate |
-| **Precio cambia** | Pre-purchase verification | Idempotent pricing | Honor price if <5% diff | Absorb o refund |
-| **Marketplace bloquea API** | API error monitoring | Respect rate limits | Cached data | Alert team |
-| **Proveedor desaparece** | Health monitoring | Multiple suppliers | Remove from ranking | Find alternative |
-| **Fraude** | Anomaly detection | Velocity checks | Block + review | Manual approval |
-| **Chargeback** | Payment provider alerts | Clear policies | Absorb cost | Fight if valid |
-| **Devolución** | Return tracking | Quality checks | Process return | Restock o write off |
-| **Producto defectuoso** | Customer report | Supplier vetting | Return + refund | Rate supplier down |
-| **Usuario abusa** | Pattern detection | Rate limiting | Block + review | Ban account |
-| **Discrepancia moneda** | Exchange rate API | Lock rate at checkout | Honor rate for 15 min | Absorb difference |
-| **Error de conversión** | Validation checks | Unit testing | Alert + fix | Manual correction |
-| **Error de variante** | Attribute validation | Strict validation | Cancel + refund | Fix matching |
-| **Proveedor tarda** | SLA monitoring | Set expectations | Update ETA | Compensate |
-| **API caída** | Health checks | Circuit breaker | Serve cached data | Alert + recover |
-
-### Plan de contingencia
-
-**Si un proveedor principal falla:**
-1. Detectar en < 5 minutos
-2. Activar fallback automático
-3. Notificar equipo
-4. Analizar causa raíz
-5. Implementar fix
-
-**Si hay fraude sistémico:**
-1. Detectar patrones anómalos
-2. Bloquear transacciones sospechosas
-3. Notificar equipo inmediatamente
-4. Investigar
-5. Implementar contramedidas
+| Risk | Probability | Impact | Mitigation |
+|------|-------------|--------|------------|
+| **TikTok Shop blocks URL extraction** | High | High | Use only public data; pivot to text search |
+| **AliExpress API changes/restricts** | Medium | High | Multiple sources; cache aggressively |
+| **Amazon PA API limitations** | Medium | Medium | scraping fallback (check ToS first) |
+| **Match accuracy too low** | Medium | High | Human review for low-confidence; GTIN focus |
+| **Margins unsustainable** | High | High | Volume-based revenue; direct supplier deals |
+| **Legal action from sources** | Low | Critical | Strict ToS compliance; legal counsel |
+| **Price changes between check and purchase** | High | Medium | Pre-purchase verification; absorb small diffs |
+| **Supplier doesn't fulfill** | Medium | High | Fallback suppliers; escrow; refund policy |
+| **User doesn't trust "TikTok wins" result** | Medium | Medium | Clear explanation; transparent methodology |
+| **Exchange rate volatility** | Medium | Medium | Lock rate at checkout; absorb small fluctuations |
+| **Delivery estimate wrong** | High | Medium | Conservative estimates; confidence levels |
+| **Competitor launches similar product** | Medium | Medium | Speed to market; data moat; UX |
 
 ---
 
-## 29. COSTOS
+## 23. Legal / ToS Considerations
 
-### Costos por fase
+### Access Method Classification
 
-#### MVP (1-100 usuarios)
+| Method | Description | Risk | Examples |
+|--------|-------------|------|----------|
+| **Official API** | Authorized API access | Low | AliExpress affiliate, Amazon PA, ML API |
+| **Affiliate API** | API through affiliate program | Low | AliExpress via Admitad |
+| **Authorized Feed** | Product data feed | Low | Google Shopping feed |
+| **Public Data** | Data publicly visible on pages | Medium | Product pages, pricing |
+| **Permitted Crawling** | robots.txt allows, ToS permits | Medium | Check per-source |
+| **Prohibited Crawling** | ToS prohibits or bot detection | High | Avoid |
+| **Ambiguous Access** | Gray area | Medium | Case-by-case review |
 
-| Componente | Costo mensual |
-|------------|---------------|
-| Hetzner VPS (App + DB) | $20 |
-| Vercel (Frontend) | $0 |
-| Cloudflare (CDN + DNS) | $0 |
-| Resend (Email) | $0 |
-| Sentry (Error tracking) | $0 |
-| OpenAI API (AI) | $50 |
-| Dominio | $1 |
-| **Total** | **~$71/mes** |
+### Per-Source Legal Assessment
 
-#### 10k usuarios
+| Source | Method | ToS Status | Risk | Recommendation |
+|--------|--------|------------|------|----------------|
+| AliExpress | Affiliate API | ✅ Allowed | Low | Include in MVP |
+| Amazon MX | PA API | ✅ Allowed with ToS | Low | Include in MVP |
+| MercadoLibre | Public API | ✅ Allowed | Low | Include in MVP |
+| eBay | Browse API | ✅ Allowed | Low | Include in MVP |
+| Walmart MX | Scraping | ⚠️ Check ToS | Medium | Test first |
+| SHEIN | Scraping | ⚠️ Anti-bot | High | Defer |
+| Temu | Scraping | ⚠️ Anti-bot | High | Defer |
+| TikTok | URL extraction | ⚠️ No official API | Medium | Limited to public data |
+| 1688 | No API | ❌ Not accessible | High | Don't include |
+| Alibaba | Affiliate | ✅ Allowed | Low | Phase 2 |
 
-| Componente | Costo mensual |
-|------------|---------------|
-| Hetzner VPS (App) | $20 |
-| Hetzner VPS (DB) | $15 |
-| Vercel Pro | $20 |
-| Cloudflare Pro | $20 |
-| Resend | $20 |
-| Sentry | $0 |
-| OpenAI API | $200 |
-| Monitoring (Grafana Cloud) | $0 |
-| **Total** | **~$295/mes** |
+### Rules
 
-#### 100k usuarios
-
-| Componente | Costo mensual |
-|------------|---------------|
-| AWS/GCP (App servers) | $200 |
-| AWS/GCP (Database) | $300 |
-| AWS/GCP (Cache) | $100 |
-| AWS/GCP (Storage) | $50 |
-| Cloudflare | $200 |
-| Resend | $50 |
-| Sentry | $26 |
-| OpenAI API | $1,000 |
-| Monitoring | $100 |
-| **Total** | **~$2,026/mes** |
-
-#### 1M usuarios
-
-| Componente | Costo mensual |
-|------------|---------------|
-| AWS/GCP (Compute) | $2,000 |
-| AWS/GCP (Database) | $1,500 |
-| AWS/GCP (Cache) | $500 |
-| AWS/GCP (Storage) | $200 |
-| AWS/GCP (CDN) | $500 |
-| Cloudflare | $500 |
-| Resend | $200 |
-| Sentry | $80 |
-| OpenAI API | $5,000 |
-| Monitoring | $300 |
-| **Total** | **~$10,780/mes** |
-
-### Costos fijos vs variables
-
-| Tipo | Ejemplos |
-|------|----------|
-| **Fijos** | VPS, dominio, email, monitoring |
-| **Variables** | AI API, bandwidth, storage, payments |
+1. **Never evade bot protection** (CAPTCHAs, IP rotation, user-agent spoofing)
+2. **Never access data behind login walls**
+3. **Never exceed rate limits**
+4. **Always respect robots.txt**
+5. **If a source blocks us, stop and reassess**
+6. **Legal counsel review before launching each source**
 
 ---
 
-## 30. STACK TECNOLÓGICO
+## 24. Business Model
 
-### Stack completo seleccionado
+### Revenue Models by Phase
 
-| Capa | Tecnología | Justificación |
-|------|------------|---------------|
-| **Frontend** | Next.js 14 (App Router) | SSR/SSG, React ecosystem, Vercel deployment |
-| **UI Components** | shadcn/ui + Tailwind | Componentes modernos, accesibles, customizables |
-| **Backend** | TypeScript + Node.js (Fastify) | Type safety, performance, mismo lenguaje que frontend |
-| **Database** | PostgreSQL 16 | Robusto, JSONB para atributos, full-text search |
-| **Cache** | Redis 7 | Queues, cache, sessions |
-| **Queue** | BullMQ | Redis-based, reliable, good DX |
-| **Search** | PostgreSQL → Meilisearch | Empezar simple, migrar cuando sea necesario |
-| **AI** | OpenAI API + sentence-transformers | GPT-4 para extracción, embeddings para matching |
-| **Storage** | Cloudflare R2 | S3-compatible, cheap, no egress fees |
-| **CDN** | Cloudflare | Gratis, rápido, DDoS protection |
-| **Email** | Resend | Moderno, good DX, React Email |
-| **Monitoring** | Sentry + Grafana + Prometheus | Error tracking + metrics + dashboards |
-| **Auth** | NextAuth.js | Integrado con Next.js, múltiples providers |
-| **Payments** | Conekta | Hecho para México, SPEI, OXXO, tarjetas |
-| **Testing** | Vitest + Playwright | Unit + E2E testing |
-| **CI/CD** | GitHub Actions | Integrado con GitHub |
-| **Docker** | Docker + Docker Compose | Local development + deployment |
-| **Migrations** | Drizzle ORM | Type-safe, lightweight |
+#### Phase 1 (MVP): Margin on Transactions
 
-### Por qué este stack
+| Model | Description | Viability |
+|-------|-------------|-----------|
+| **Transaction margin** | 3-5% on each sale | ✅ Primary |
+| **Affiliate commissions** | Revenue from affiliate programs | ✅ Secondary |
 
-1. **TypeScript everywhere:** Un solo lenguaje, type safety end-to-end
-2. **PostgreSQL:** No necesitamos NoSQL para esto, JSONB cubre atributos variables
-3. **Redis + BullMQ:** Simple, confiable,Redis + BullMQ:** Simple, confiable,无需 Kafka para MVP
-4. **Next.js:** Deploy gratis en Vercel, SSR para SEO
-5. **Conekta:** Optimizado para México, mejor que Stripe en México
-6. **Cloudflare:** Gratis y mejor que AWS CloudFront para empezar
+**Why this works:** We buy from supplier at X, sell to customer at X + margin. Simple, scalable, aligned with user value.
 
----
+#### Phase 2 (10k users): Hybrid
 
-## 31. DEVELOPMENT ENVIRONMENT
+| Model | Description | Viability |
+|-------|-------------|-----------|
+| **Transaction margin** | 3-5% | ✅ Primary |
+| **Affiliate commissions** | From sources | ✅ Secondary |
+| **Supplier commissions** | Suppliers pay for visibility | ⚠️ Careful — don't bias results |
 
-### Configuración
+**Caution:** Supplier commissions must NEVER bias the ranking. PriceHunt's trust is more valuable than any commission.
 
-```
-project/
-├── apps/
-│   ├── web/              # Next.js frontend
-│   └── admin/            # Next.js admin panel
-├── packages/
-│   ├── db/               # Drizzle schema + migrations
-│   ├── ui/               # Shared UI components
-│   ├── api/              # Backend API (Fastify)
-│   ├── worker/           # Background workers (BullMQ)
-│   └── shared/           # Shared types, utils
-├── docker/
-│   ├── docker-compose.yml
-│   └── docker-compose.prod.yml
-├── .github/
-│   └── workflows/
-│       ├── ci.yml
-│       └── deploy.yml
-├── turbo.json            # Turborepo config
-├── package.json
-└── tsconfig.json
-```
+#### Phase 3 (100k+ users): Platform
 
-### Scripts
+| Model | Description | Viability |
+|-------|-------------|-----------|
+| **Transaction margin** | 3-5% | ✅ Primary |
+| **Affiliate commissions** | Multiple programs | ✅ Secondary |
+| **Premium membership** | Advanced features, alerts | ⚠️ Phase 3 |
+| **Supplier deals** | Direct agreements | ⚠️ Phase 4 |
 
-```json
-{
-  "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx packages/db/seed.ts"
-  }
-}
-```
+### Revenue Projections
 
-### Docker Compose (local)
+| Phase | Users | Orders/month | Ticket avg | Monthly Revenue |
+|-------|-------|--------------|------------|-----------------|
+| MVP | 100 | 100 | $500 MXN | $1,500 MXN (~$85 USD) |
+| Growth | 10k | 1,000 | $500 MXN | $15,000 MXN (~$850 USD) |
+| Scale | 100k | 10,000 | $500 MXN | $150,000 MXN (~$8,500 USD) |
+| Platform | 1M | 100,000 | $500 MXN | $1,500,000 MXN (~$85,000 USD) |
 
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: pricehunt
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
-    
-  meilisearch:
-    image: getmeili/meilisearch:v1.6
-    ports:
-      - "7700:7700"
-```
-
-### CI/CD
-
-```yaml
-# .github/workflows/ci.yml
-name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build
-```
+*(Assuming 3% average margin)*
 
 ---
 
-## 32. TESTING
+## 25. Build Now / Build Later / Do Not Build Yet
 
-### Estrategia de testing
+### BUILD NOW (Phase 0 + MVP)
 
-| Tipo | Herramienta | Cobertura | Velocidad |
-|------|-------------|-----------|-----------|
-| **Unit** | Vitest | 80%+ | Rápido |
-| **Integration** | Vitest | API endpoints | Medio |
-| **E2E** | Playwright | Flujos críticos | Lento |
-| **Load** | k6 | Performance | Lento |
-| **Pricing** | Custom | Price engine | Rápido |
+| Component | Reason |
+|-----------|--------|
+| TikTok URL parser | Core feature — user entry point |
+| Product identification | Core feature — must work |
+| Supplier adapters (AliExpress, Amazon, ML) | Core data sources |
+| Matching engine (improved) | Core — must find correct matches |
+| Landed cost calculator | Core — must show real cost |
+| Delivery estimation | Core — TikTok's advantage must be accounted for |
+| Price explanation | Core — trust requires transparency |
+| Ranking (Cheapest/Fastest/Best) | Core — user decision support |
+| Checkout (Conekta) | Core — enable transactions |
+| Order management | Core — fulfill orders |
+| Basic admin | Needed to operate |
+| Email notifications | Transactional emails |
 
-### PRICE ENGINE TESTING (crítico)
+### BUILD LATER (Phase 2: 10k users)
 
-```typescript
-describe('Price Engine', () => {
-  it('should never sell below cost', () => {
-    const cost = 100;
-    const price = calculatePrice(cost, strategy);
-    expect(price).toBeGreaterThanOrEqual(cost);
-  });
-  
-  it('should maintain minimum margin', () => {
-    const minMargin = 0.02; // 2%
-    const price = calculatePrice(100, strategy);
-    const margin = (price - 100) / 100;
-    expect(margin).toBeGreaterThanOrEqual(minMargin);
-  });
-  
-  it('should be competitive when possible', () => {
-    const competitorPrice = 105;
-    const ourPrice = calculatePrice(100, strategy, competitorPrice);
-    expect(ourPrice).toBeLessThanOrEqual(competitorPrice);
-  });
-});
-```
+| Component | Reason |
+|-----------|--------|
+| Image search | Nice-to-have, not needed for validation |
+| Advanced analytics | Need data first |
+| Admin panel (full) | Manual management works for MVP |
+| Supplier health monitoring | Important but can start basic |
+| Price alerts | Retention feature |
+| User accounts | Guest checkout first |
+| Multi-currency display | Can hardcode MXN for Mexico |
+| Exchange rate API | Can hardcode for MVP |
 
-### Supplier mocks
+### DO NOT BUILD YET
 
-```typescript
-const mockSupplier = {
-  getProduct: vi.fn().mockResolvedValue({
-    price: 95,
-    shipping: 5,
-    in_stock: true,
-    delivery_days: 7
-  }),
-  placeOrder: vi.fn().mockResolvedValue({
-    order_id: 'MOCK-001',
-    status: 'confirmed'
-  })
-};
-```
-
-### Failure injection
-
-```typescript
-describe('Order routing with failures', () => {
-  it('should fallback to next supplier on failure', async () => {
-    supplierA.placeOrder.mockRejectedValue(new Error('Out of stock'));
-    supplierB.placeOrder.mockResolvedValue({ order_id: '002' });
-    
-    const result = await routeOrder(order);
-    expect(result.supplier).toBe('B');
-  });
-});
-```
+| Component | Reason |
+|-----------|--------|
+| Browser extension | Not needed for validation |
+| Native mobile app | PWA sufficient for MVP |
+| Kafka | BullMQ handles queue needs |
+| Kubernetes | Single VPS sufficient |
+| Microservices | Modular monolith is correct |
+| Advanced ML (CLIP, embeddings) | Jaccard + deterministic is sufficient for MVP |
+| Image matching | GTIN/title matching works for most products |
+| Multi-country | Focus on Mexico |
+| Multi-language | Focus on Spanish |
+| Affiliate system | Manual initially |
+| Referral system | Phase 3+ |
+| Fraud detection | Phase 3+ |
+| Real-time pricing updates | Hourly/daily sufficient for MVP |
+| Supplier auto-negotiation | Phase 5+ |
+| Predictive pricing | Phase 5+ |
+| White-label | Phase 5+ |
+| GraphQL | REST sufficient |
+| Elasticsearch | Meilisearch sufficient |
+| Redis Sentinel/Cluster | Single Redis sufficient |
+| Read replicas | Single DB sufficient |
 
 ---
 
-## 33. REPRODUCIBILIDAD DEL PRECIO
+## 26. Revised Roadmap
 
-### Cada precio mostrado debe poder explicarse
+### Phase 0 — Research & Validation (2-4 weeks)
 
-```typescript
-interface PriceExplanation {
-  timestamp: string;
-  source: string;
-  supplier: string;
-  product: string;
-  variant: string;
-  product_price: number;
-  shipping: number;
-  tax: number;
-  fees: number;
-  exchange_rate: number;
-  final_cost: number;
-  competitor_price: number;
-  our_price: number;
-  pricing_rule: string;
-  algorithm_version: string;
-}
-```
+**Objective:** Validate that PriceHunt can find real better deals legally.
 
-###-storage
+**Deliverables:**
+- 200-product experiment completed
+- Legal audit complete
+- Source viability report
+- Category opportunity analysis
+- Pivot/continue decision
 
-Cada `current_prices` row debe tener un `price_explanation` JSONB:
+**Cost:** $0 (using existing infrastructure)
+**Team:** 1 person
 
-```json
-{
-  "timestamp": "2024-01-15T14:32:00Z",
-  "source": "aliexpress_api",
-  "supplier": "aliexpress",
-  "product": "iPhone 15 Case",
-  "variant": "Black/Medium",
-  "product_price": 8.50,
-  "shipping": 3.20,
-  "tax": 1.89,
-  "fees": 0.50,
-  "exchange_rate": 17.15,
-  "final_cost": 143.75,
-  "competitor_price": 155.00,
-  "our_price": 149.99,
-  "pricing_rule": "strategy_a_competitor_minus_1",
-  "algorithm_version": "1.2.3"
-}
-```
+### Phase 1a — MVP Core (DONE)
 
-### Esto nos permite responder
+**Objective:** Build core matching, pricing, and ingestion.
 
-- "¿Por qué el producto costaba $106 a las 14:32?"
-- "¿Qué proveedor se usó?"
-- "¿Qué regla de pricing se aplicó?"
-- "¿Cuál era el costo real?"
+**Status:** ✅ Nearly complete. Code written, 54 tests passing.
 
----
+**Remaining:**
+- Run workers on VM
+- Test end-to-end
+- Wire up ingestion worker to API
 
-## 34. VERSIONING
+### Phase 1b — MVP Complete (4-6 weeks)
 
-### Qué versionar
-
-| Componente | Estrategia | Herramienta |
-|------------|------------|-------------|
-| **Pricing algorithms** | Semver (major.minor.patch) | Git tags + DB |
-| **Matching algorithms** | Semver | Git tags + DB |
-| **Supplier adapters** | Semver | Git tags |
-| **DB migrations** | Sequential (001, 002, ...) | Drizzle |
-| **APIs** | URL versioning (/v1/, /v2/) | Fastify routes |
-| **ML models** | Semver + hash | Model registry |
-
-### Rollback strategy
-
-```typescript
-// Price engine versioning
-interface PricingAlgorithm {
-  version: string;
-  execute: (input: PricingInput) => PricingOutput;
-}
-
-// Store algorithm version with each price
-interface PriceRecord {
-  algorithm_version: string;
-  // ... other fields
-}
-
-// Rollback: just change active algorithm version
-```
-
----
-
-## 35. ROADMAP
-
-### Phase 0 — Research (2-4 semanas)
+**Objective:** Full MVP with checkout and orders.
 
 **Features:**
-- Validar ToS de cada fuente potencial
-- Investigar APIs disponibles
-- Analizar competencia
-- Validar modelo de negocio
+- Delivery estimation model
+- Improved matching (MPN, brand, attributes)
+- Price explanation
+- Ranking (Cheapest/Fastest/Best)
+- Checkout with Conekta
+- Order management
+- Basic admin (manual)
+- Email notifications
 
-**Infraestructura:** N/A
-**Equipo:** 1 persona
-**Costo:** $0
-**Riesgos:** Que las fuentes no permitan integración
-**Criterio de éxito:** Documento de fuentes viables
+**Cost:** ~$100/month (Hetzner + Vercel + Conekta)
+**Team:** 1-2 people
 
-### Phase 1 — MVP (8-12 semanas)
+### Phase 2 — Production (8-12 weeks)
 
-**Features:**
-- Pegar URL → identificar producto
-- Buscar en 1-2 fuentes
-- Mostrar precio
-- Checkout básico
-- Order tracking básico
-
-**Infraestructura:** Hetzner VPS
-**Equipo:** 1-2 personas
-**Costo:** $100-300/mes
-**Riesgos:** Matching inexacto, precios desactualizados
-**Criterio de éxito:** 100 órdenes completadas
-
-### Phase 2 — Production (12-16 semanas)
+**Objective:** Scale to 10k users.
 
 **Features:**
-- 5+ fuentes de datos
-- Matching mejorado
-- Shipping engine
-- Tax engine
-- Admin panel
-- Monitoring
+- 5+ sources active
+- Image matching (CLIP)
+- Full admin panel
+- Advanced analytics
+- Price alerts
+- User accounts
+- Improved matching accuracy
 
-**Infraestructura:** Hetzner + Vercel
-**Equipo:** 2-3 personas
-**Costo:** $500-1,000/mes
-**Riesgos:** Escalabilidad, soporte
-**Criterio de éxito:** 1,000 órdenes/mes
+**Cost:** ~$300/month
+**Team:** 2-3 people
 
-### Phase 3 — Scale (6-12 meses)
+### Phase 3 — Growth (12-24 weeks)
 
-**Features:**
-- Búsqueda por imagen
-- Extensión de navegador
-- Más fuentes
-- Programa de afiliados
-- Analytics avanzado
-
-**Infraestructura:** AWS/GCP
-**Equipo:** 3-5 personas
-**Costo:** $3,000-8,000/mes
-**Riesgos:** Competencia, costos crecientes
-**Criterio de éxito:** 10,000 órdenes/mes
-
-### Phase 4 — Direct Suppliers (12-18 meses)
+**Objective:** Scale to 100k users.
 
 **Features:**
-- Acuerdos directos con proveedores
-- Mejores precios
-- Exclusividad en productos
-- Negociación automática
+- Browser extension
+- PWA mobile app
+- Affiliate system
+- Referral system
+- Multi-country (LATAM)
+- Advanced ML matching
 
-**Infraestructura:** AWS/GCP
-**Equipo:** 5-10 personas
-**Costo:** $10,000-20,000/mes
-**Riesgos:** Negociaciones fallidas
-**Criterio de éxito:** 30% de órdenes vía acuerdos directos
+**Cost:** ~$1,000-2,000/month
+**Team:** 3-5 people
 
-### Phase 5 — Intelligent Purchasing Network (18-24 meses)
+### Phase 4 — Platform (24+ weeks)
+
+**Objective:** 1M+ users.
 
 **Features:**
-- Predictive purchasing
+- Direct supplier agreements
 - Auto-negotiation
-- Multi-country
-- B2B marketplace
+- Predictive pricing
 - White-label
+- API for partners
 
-**Infraestructura:** Multi-region
-**Equipo:** 10+ personas
-**Costo:** $20,000-50,000/mes
-**Riesgos:** Complejidad operativa
-**Criterio de éxito:** 100,000 órdenes/mes
+**Cost:** ~$5,000-10,000/month
+**Team:** 5-10 people
 
 ---
 
-## 36. MVP MÍNIMO
+## 27. Open Questions
 
-### Flujo del MVP
+### Product
 
-```
-Usuario pega URL de TikTok/Amazon/AliExpress
-  ↓
-Sistema identifica el producto (título, imagen, precio)
-  ↓
-Busca en 1-2 fuentes alternativas
-  ↓
-Muestra mejor oferta encontrada
-  ↓
-Calcula nuestro precio (margen mínimo)
-  ↓
-Checkout (guest, Stripe/Conekta)
-  ↓
-Orden creada
-  ↓
-Compra al proveedor (manual o semi-automática)
-  ↓
-Tracking al usuario
-```
+1. **What percentage of TikTok Shop products have GTINs?** This determines matching strategy.
+2. **How do we handle TikTok Shop products that are exclusive (not sold elsewhere)?** We must honestly say "no alternative found."
+3. **Should PriceHunt show products that are MORE expensive but faster?** Yes — "Best Overall" ranking.
+4. **How do we handle flash sales / temporary discounts?** Track price history, note when price is unusually low.
 
-### Stack del MVP
+### Technical
 
-- **Frontend:** Next.js (Vercel)
-- **Backend:** Node.js + Fastify (Hetzner)
-- **DB:** PostgreSQL (Hetzner)
-- **Cache:** Redis (Hetzner)
-- **Queue:** BullMQ (Hetzner)
-- **AI:** OpenAI API
-- **Payments:** Conekta
-- **Email:** Resend
+5. **Can we get reliable delivery data from AliExpress API?** Need to test.
+6. **How accurate is Amazon's delivery estimation via API?** Need to test.
+7. **Do SHEIN/Temu have anti-bot measures that make scraping impossible?** Need to test.
+8. **What's the minimum viable matching accuracy?** Probably 80%.
 
-### Qué SÍ tiene el MVP
-- Identificación de producto desde URL
-- Matching básico (texto)
-- 2-3 fuentes de datos
-- Precio final calculado
-- Checkout funcional
-- Order tracking básico
-- Email transaccional
+### Business
 
-### Qué NO tiene el MVP
-- Búsqueda por imagen
-- Extensión de navegador
-- App móvil
-- Admin panel completo
-- Analytics avanzado
-- Múltiples proveedores por orden
-- Programa de afiliados
+9. **Should we charge suppliers for visibility?** Only after proving value, never biasing results.
+10. **What's the minimum order value for viable margins?** Probably $200+ MXN.
+11. **Do we need to handle returns/refunds ourselves?** For MVP, delegate to supplier.
+
+### Legal
+
+12. **Is extracting TikTok product data legal in Mexico?** Need legal review.
+13. **Can we use Amazon product images in our results?** Probably with attribution.
+14. **Do we need to register as a marketplace with PROFECO?** Probably yes.
 
 ---
 
-## 37. MVP EXPERIMENTAL
+## 28. Final Recommendation
 
-### Objetivo validar
+### Priority Order
 
-**¿Las personas realmente quieren pegar un producto de TikTok y comprarlo más barato en otra página?**
+1. **Run the 200-product experiment.** This is the single most important thing. Everything else is hypothesis until we have data.
 
-### Diseño del MVP experimental
+2. **Complete Phase 1a.** Wire up the workers, test end-to-end on VM. The code is written; make it work.
 
-**Una sola página web con:**
-1. Input para pegar URL de TikTok
-2. Botón "Encontrar mejor precio"
-3. Resultado: mostrar si encontramos más barato
-4. Si sí → formulario de email para notificar cuando esté listo
-5. Si no → mostrar precio actual y alternativas
+3. **Audit legal/ToS.** Before building anything more, confirm we can legally access each source.
 
-### Stack del MVP experimental
+4. **Build the delivery model.** This is the gap that TikTok Shop exploits. Without it, our comparison is incomplete.
 
-- **Frontend:** Next.js (Vercel)
-- **Backend:** Serverless functions (Vercel)
-- **DB:** Supabase (gratis)
-- **AI:** OpenAI API
-- **Sin checkout real**
-- **Sin proveedores reales**
+5. **Build price explanation.** Trust requires transparency. Every price must be explainable.
 
-### Métricas a validar
+6. **Then build checkout.** Only after the comparison engine works and we've validated the thesis.
 
-1. **Tasa de uso:** ¿Cuántas personas pegan URLs?
-2. **Tasa de conversión:** ¿Cuántas quieren comprar?
-3. **Fuentes de tráfico:** ¿De dónde vienen?
-4. **Productos buscados:** ¿Qué categorías son populares?
+### What NOT to Do
 
-### Tiempo de construcción
+- Don't build more supplier adapters until we know which sources are viable
+- Don't build the frontend until the backend comparison engine works
+- Don't scale until we've validated with real users
+- Don't add complexity until we need it
 
-**2-4 semanas** con 1 desarrollador
+### The Experiment Comes First
 
-### Criterio de éxito
+Before writing another line of code, we need to answer:
 
-- 100+ URLs pegadas en 2 semanas
-- 30%+ tasa de interés (emails capturados)
-- Identificación de 3+ categorías populares
+> **"On what percentage of real TikTok Shop products can PriceHunt find a genuinely better deal?"**
+
+If the answer is <20%, we pivot. If it's >20%, we build.
 
 ---
 
-## 38. DECISION LOG
-
-| Decisión | Opciones | Elegida | Razón | Cuándo reconsiderar |
-|----------|----------|---------|-------|---------------------|
-| **Arquitectura** | Monolito, Microservicios, Modular monolith | Modular monolith | Balance entre simplicidad y escalabilidad | 100k usuarios |
-| **Frontend** | Next.js, Remix, SPA | Next.js | SSR para SEO, Vercel deploy | Si necesitamos app móvil |
-| **Backend** | Node.js, Python, Go | Node.js (Fastify) | Type safety con frontend, performance | Si CPU-bound crítico |
-| **Database** | PostgreSQL, MySQL, MongoDB | PostgreSQL | JSONB, full-text, madurez | Si NoSQL es mejor para un caso |
-| **Cache** | Redis, Memcached | Redis | Queues + cache en uno | Nunca |
-| **Queue** | BullMQ, RabbitMQ, Kafka | BullMQ | Simple, Redis-based | Si necesitamos event sourcing |
-| **Search** | PostgreSQL, Meilisearch, Elasticsearch | PostgreSQL → Meilisearch | Empezar simple | 100k productos |
-| **AI** | OpenAI, open source | OpenAI | Calidad, DX | Si costos suben mucho |
-| **Payments** | Stripe, Conekta, Mercado Pago | Conekta | México-optimized | Si expandimos a otros países |
-| **CDN** | Cloudflare, AWS CloudFront | Cloudflare | Gratis, DDoS protection | Nunca |
-| **Hosting** | Hetzner, AWS, GCP | Hetzner (MVP) → AWS (scale) | Costo inicial, escalabilidad | 100k usuarios |
-| **Email** | SendGrid, Resend, SES | Resend | Moderno, React Email | Si necesitamos más features |
-| **Error tracking** | Sentry, Rollbar | Sentry | Free tier generoso | Nunca |
-| **Testing** | Jest, Vitest | Vitest | Más rápido, ESM | Nunca |
-
----
-
-## 39. RISK MATRIX
-
-| Riesgo | Probabilidad | Impacto | Mitigation |
-|--------|--------------|---------|------------|
-| **ToS violation por scraping** | Media | Crítico | Usar solo APIs oficiales y feeds autorizados |
-| **Proveedores bloquean acceso** | Media | Alto | Múltiples fuentes, cache, acuerdos oficiales |
-| **Márgenes insuficientes** | Alta | Alto | Volume-based revenue, direct supplier deals |
-| **Matching incorrecto** | Media | Alto | Validación humana, feedback loop, UMBRELA de confianza |
-| **Precio cambia post-checkout** | Alta | Alto | Pre-purchase verification, absorber diferencias pequeñas |
-| **Proveedor no cumple** | Media | Alto | SLA monitoring, fallback suppliers, escrow |
-| **Fraude** | Baja | Crítico | Velocity checks, manual review, block suspicious |
-| **Competencia responde** | Alta | Medio | First-mover advantage, data moat, UX |
-| **Regulación cambia** | Baja | Crítico | Legal counsel, flexible architecture |
-| **Escalabilidad insuficiente** | Baja | Alto | Architecture designed for scale, cloud migration path |
-| **AI costos suben** | Media | Medio | Open source models, caching, selective use |
-| **Equipo no alcanza** | Media | Alto | Priorización estricta, MVP realista |
-| **Usuarios no adoptan** | Media | Crítico | Validación temprana, pivot rápido |
-| **Pagos fallan** | Baja | Crítico | Múltiples providers, retry logic |
-| **Data breach** | Baja | Crítico | Encryption, minimal PII, security audit |
-
----
-
-## 40. "WHAT ARE WE MISSING?"
-
-### Puntos ciegos identificados
-
-#### 1. **Multi-moneda real**
-- ¿Qué pasa cuando un proveedor cobra en USD y el usuario paga en MXN?
-- Necesitamos hedging o conversión en tiempo real
-- **Mitigación:** Lock exchange rate at checkout, absorber small fluctuations
-
-#### 2. **Garantías y devoluciones**
-- ¿Quién maneja garantías? ¿Nosotros o el proveedor?
-- ¿Cómo procesamos devoluciones?
-- **Mitigación:** Política clara, proveedores confiables, seguro de devolución
-
-#### 3. **Fraude de proveedores**
-- ¿Qué pasa si un proveedor envía producto falso?
-- **Mitigación:** Rating de proveedores, inspección aleatoria, seguro
-
-#### 4. **Impuestos internacionales**
-- ¿Cómo manejamos IVA en importaciones?
-- ¿DDP vs DDU?
-- **Mitigación:** Consultar con contador,开始 con DDP simple
-
-#### 5. **Scaler más allá de México**
-- ¿Multi-idioma? ¿Multi-moneda? ¿Multi-legal?
-- **Mitigación:** Preparar desde el principio pero no implementar aún
-
-#### 6. **Mobile app**
-- Los usuarios de TikTok están en mobile
-- ¿Web app es suficiente?
-- **Mitigación:** PWA para MVP, app nativa después
-
-#### 7. **Soporte al cliente**
-- ¿Quién responde preguntas?
-- ¿Chat en vivo? ¿Email? ¿Phone?
-- **Mitigación:** Email + FAQ para MVP, chat después
-
-#### 8. **SEO**
-- ¿Cómo genera tráfico orgánico?
-- **Mitigación:** Product pages con SSR, blog de ofertas
-
-#### 9. **Social proof**
-- ¿Reseñas? ¿Ratings?
-- **Mitigación:** Fase 2
-
-#### 10. **Programa de referidos**
-- ¿Cómo crece viralmente?
-- **Mitigación:** Fase 2
-
-#### 11. **Contenido**
-- ¿Blog? ¿Comparativas? ¿Guías?
-- **Mitigación:** Fase 2
-
-#### 12. **Customer lifetime value**
-- ¿Cómo retenemos usuarios?
-- **Mitigación:** Email de ofertas, wishlist, price alerts
-
----
-
-## RECOMENDACIÓN FINAL
-
-### Para empezar MAÑANA
-
-1. **Validar ToS** de AliExpress, Amazon, Mercado Libre
-2. **Construir MVP experimental** (2-4 semanas)
-3. **Validar con 100 usuarios reales**
-4. **Si validado:** Construir MVP real (8-12 semanas)
-5. **Si no validado:** Pivotar o abandonar
-
-### Stack mínimo para empezar
-
-```
-Next.js + Fastify + PostgreSQL + Redis + BullMQ + Conekta
-```
-
-### Presupuesto mínimo
-
-- **Desarrollo:** 1-2 desarrolladores full-time
-- **Infraestructura:** $100/mes
-- **AI:** $50/mes
-- **Total:** ~$150/mes + salarios
-
-### Primer commit
-
-```bash
-# Day 1
-npx create-turbo@latest pricehunt
-# Configurar PostgreSQL schema
-# Configurar Next.js basics
-# Configurar Fastify server
-```
-
-### Criterio de éxito del MVP
-
-- 100 órdenes completadas
-- 70%+ tasa de satisfacción
-- Margen promedio > 2%
-- 0 errores críticos
-
----
-
-**Estado:** Planificación completa
-**Siguiente paso:** Validación de ToS + MVP experimental
-**Fecha:** 2026-08-28
+**Document status:** Restructured planning complete
+**Date:** 2026-08-29
+**Next step:** Run 200-product experiment
+**Decision required:** Proceed with Phase 0 experiment or complete Phase 1a first?

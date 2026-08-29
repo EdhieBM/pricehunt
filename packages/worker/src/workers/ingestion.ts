@@ -122,15 +122,20 @@ async function getOrCreateSupplier(slug: SupplierSlug) {
 
   if (existing.length > 0) return existing[0];
 
-  const names: Record<SupplierSlug, string> = {
+  const names: Record<string, string> = {
     aliexpress: 'AliExpress',
     amazon: 'Amazon',
     mercadolibre: 'Mercado Libre',
+    ebay: 'eBay',
+    walmart: 'Walmart',
+    shein: 'SHEIN',
+    temu: 'Temu',
+    tiktokshop: 'TikTok Shop',
   };
 
   const [created] = await db
     .insert(suppliers)
-    .values({ name: names[slug], slug, type: 'api' })
+    .values({ name: names[slug] || slug, slug, type: 'api' })
     .returning();
 
   return created;
