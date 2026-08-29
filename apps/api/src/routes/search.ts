@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { db, products, currentPrices, supplierProducts, brands } from '@pricehunt/db';
+import { db, products, currentPrices, supplierProducts, brands, searchProducts } from '@pricehunt/db';
+import type { MeiliProduct } from '@pricehunt/db';
 import { eq, sql, and, gte, lte } from 'drizzle-orm';
 
 export async function searchRoutes(app: FastifyInstance) {
-  // GET /search?q=...&brand=...&category=...&min_price=...&max_price=...&in_stock=...&page=...&limit=...
   app.get('/', async (request) => {
     const query = request.query as Record<string, string>;
 
@@ -14,9 +14,68 @@ export async function searchRoutes(app: FastifyInstance) {
     const inStock = query.in_stock === 'true';
     const page = parseInt(query.page || '1');
     const limit = Math.min(parseInt(query.limit || '20'), 100);
-    const offset = (page - 1) * limit;
 
-    // Build conditions
+    if (searchQuery) {
+      try {
+        const filterParts: string[] = [];
+        if (brand) filterParts.push(`supplier = "${brand}"`);
+        if (inStock) filterParts.push('inStock = true');
+
+        const meiliResults = await searchProducts(searchQuery, {
+          filters: filterParts.length > 0 ? filterParts : undefined,
+          limit,
+          offset: (page - 1) * limit,
+        });
+
+        const enriched = await Promise.all(
+          meiliResults.hits.map(async (hit: MeiliProduct) => {
+            const [priceRow] = await db
+              .select({ finalPrice: currentPrices.finalPrice, inStock: currentPrices.inStock })
+              .from(supplierProducts)
+              .innerJoin(currentPrices, eq(supplierProducts.id, currentPrices.supplierProductId))
+              .where(eq(supplierProducts.id, hit.id))
+              .limit(1);
+
+            return {
+              id: hit.id,
+              canonicalName: hit.title,
+              slug: hit.slug,
+              brandName: hit.brand,
+              bestPrice: priceRow?.finalPrice || hit.price?.toString() || null,
+              inStock: priceRow?.inStock ?? hit.inStock ?? true,
+              imageUrl: hit.imageUrl,
+            };
+          }),
+        );
+
+        let filtered = enriched;
+        if (minPrice !== undefined) {
+          filtered = filtered.filter((r) => {
+            const p = r.bestPrice ? parseFloat(r.bestPrice) : 0;
+            return p >= minPrice;
+          });
+        }
+        if (maxPrice !== undefined) {
+          filtered = filtered.filter((r) => {
+            const p = r.bestPrice ? parseFloat(r.bestPrice) : Infinity;
+            return p <= maxPrice;
+          });
+        }
+
+        return {
+          query: searchQuery,
+          total: meiliResults.total || filtered.length,
+          page,
+          limit,
+          results: filtered,
+          source: 'meilisearch',
+        };
+      } catch {
+        // Fall through to PostgreSQL
+      }
+    }
+
+    const offset = (page - 1) * limit;
     const conditions = [eq(products.isActive, true)];
 
     if (searchQuery) {
@@ -43,7 +102,6 @@ export async function searchRoutes(app: FastifyInstance) {
 
     const whereClause = and(...conditions);
 
-    // Get products
     const results = await db
       .select({
         id: products.id,
@@ -62,7 +120,6 @@ export async function searchRoutes(app: FastifyInstance) {
       .limit(limit)
       .offset(offset);
 
-    // Get total count
     const [countResult] = await db
       .select({ count: sql<number>`count(*)` })
       .from(products)
@@ -79,6 +136,7 @@ export async function searchRoutes(app: FastifyInstance) {
       page,
       limit,
       results,
+      source: 'postgresql',
     };
   });
 }

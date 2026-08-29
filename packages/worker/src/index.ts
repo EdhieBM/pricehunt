@@ -1,6 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
-import { db, suppliers, supplierProducts, currentPrices, products, brands } from '@pricehunt/db';
+import { db, suppliers, supplierProducts, currentPrices, priceEvents, products, brands } from '@pricehunt/db';
 import { getSupplierAdapter } from '@pricehunt/db';
 import type { SupplierSlug } from '@pricehunt/shared';
 import { parseProductUrl } from '@pricehunt/shared';
@@ -142,6 +142,20 @@ const ingestionWorker = new Worker(
       });
     }
 
+    // Record price event for history
+    try {
+      await db.insert(priceEvents).values({
+        supplierProductId: sp!.id,
+        price: priceData.price.toString(),
+        currency: priceData.currency,
+        shippingCost: priceData.shippingCost.toString(),
+        finalPrice: finalPrice.toString(),
+        inStock: priceData.inStock,
+      });
+    } catch {
+      // Non-critical
+    }
+
     job.updateProgress(90);
 
     // Index in Meilisearch
@@ -168,6 +182,20 @@ const ingestionWorker = new Worker(
     job.updateProgress(100);
 
     console.log(`[INGESTION] Complete: ${identified.title} — $${priceData.price} ${priceData.currency}`);
+
+    // Auto-trigger matching
+    try {
+      await matchingQueue.add('match-product', {
+        supplierProductId: sp!.id,
+        title: identified.title,
+        brand: (identified.attributes?.brand as string) || null,
+        gtin: (identified.attributes?.gtin as string) || null,
+        attributes: identified.attributes,
+      }, { attempts: 2 });
+      console.log(`[INGESTION] Enqueued matching for: ${identified.title}`);
+    } catch {
+      console.warn(`[INGESTION] Failed to enqueue matching for: ${identified.title}`);
+    }
 
     return {
       success: true,
@@ -259,9 +287,36 @@ const matchingWorker = new Worker(
       return { matched: true, productId: bestMatch.productId, confidence: bestMatch.confidence, type: bestMatch.type };
     }
 
-    console.log(`[MATCHING] No match found (best score: ${bestScore})`);
+    // No match found — create a new canonical product
+    console.log(`[MATCHING] No match found (best: ${bestScore}). Creating new product: ${title}`);
+    const [newProduct] = await db
+      .insert(products)
+      .values({
+        canonicalName: title,
+        slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+        brandId: null,
+        gtin: gtin || null,
+        attributes: attributes || {},
+        isActive: true,
+      })
+      .returning();
+
+    if (newProduct) {
+      await db
+        .update(supplierProducts)
+        .set({
+          productId: newProduct.id,
+          matchConfidence: '1.00',
+          matchType: 'exact',
+          updatedAt: new Date(),
+        })
+        .where(eq(supplierProducts.id, supplierProductId));
+
+      console.log(`[MATCHING] Created product ${newProduct.id}: ${title}`);
+    }
+
     job.updateProgress(100);
-    return { matched: false, confidence: bestScore };
+    return { matched: false, confidence: bestScore, createdProduct: newProduct?.id };
   },
   { connection, concurrency: 5 },
 );
