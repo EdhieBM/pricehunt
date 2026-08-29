@@ -1,0 +1,1543 @@
+openapi: 3.1.0
+info:
+  title: PriceHunt API
+  description: API para la plataforma de comercio algorítmico PriceHunt
+  version: 1.0.0
+  contact:
+    email: api@pricehunt.mx
+
+servers:
+  - url: http://localhost:3001/api/v1
+    description: Local development
+  - url: https://api.pricehunt.mx/v1
+    description: Production
+
+tags:
+  - name: Products
+    description: Gestión de productos
+  - name: Search
+    description: Búsqueda de productos
+  - name: Matching
+    description: Product matching
+  - name: Pricing
+    description: Motor de precios
+  - name: Orders
+    description: Gestión de órdenes
+  - name: Checkout
+    description: Proceso de checkout
+  - name: Suppliers
+    description: Gestión de proveedores
+  - name: Users
+    description: Gestión de usuarios
+  - name: Admin
+    description: Endpoints de administración
+
+paths:
+  /products/identify:
+    post:
+      tags: [Products]
+      summary: Identificar producto desde URL
+      description: |
+        Recibe una URL de cualquier e-commerce y extrae información del producto.
+        Soporta: TikTok, AliExpress, Amazon, Mercado Libre, URLs genéricas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentifyProductRequest'
+      responses:
+        '200':
+          description: Producto identificado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentifiedProduct'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /products/{id}:
+    get:
+      tags: [Products]
+      summary: Obtener producto por ID
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Producto encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /products/{id}/variants:
+    get:
+      tags: [Products]
+      summary: Obtener variantes de un producto
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Lista de variantes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductVariant'
+
+  /products/{id}/images:
+    get:
+      tags: [Products]
+      summary: Obtener imágenes de un producto
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Lista de imágenes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductImage'
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Buscar productos
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Término de búsqueda
+        - name: brand
+          in: query
+          schema:
+            type: string
+          description: Filtrar por marca
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: Filtrar por categoría
+        - name: min_price
+          in: query
+          schema:
+            type: number
+          description: Precio mínimo
+        - name: max_price
+          in: query
+          schema:
+            type: number
+          description: Precio máximo
+        - name: in_stock
+          in: query
+          schema:
+            type: boolean
+          description: Solo productos en stock
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Resultados de búsqueda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+  /search/image:
+    post:
+      tags: [Search]
+      summary: Buscar por imagen
+      description: |
+        Sube una imagen para encontrar productos similares.
+        Usa CLIP para matching visual.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Imagen del producto
+              required:
+                - image
+      responses:
+        '200':
+          description: Productos similares encontrados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+  /matching/{product_id}/candidates:
+    get:
+      tags: [Matching]
+      summary: Obtener candidatos de matching para un producto
+      description: |
+        Busca productos equivalentes en múltiples fuentes/proveedores.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - name: min_confidence
+          in: query
+          schema:
+            type: number
+            default: 0.7
+          description: Confianza mínima de matching
+      responses:
+        '200':
+          description: Candidatos encontrados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchingCandidates'
+
+  /matching/verify:
+    post:
+      tags: [Matching]
+      summary: Verificar matching entre dos productos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_a_id:
+                  type: string
+                  format: uuid
+                product_b_id:
+                  type: string
+                  format: uuid
+              required:
+                - product_a_id
+                - product_b_id
+      responses:
+        '200':
+          description: Resultado del matching
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResult'
+
+  /pricing/calculate:
+    post:
+      tags: [Pricing]
+      summary: Calcular precio para un producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PricingRequest'
+      responses:
+        '200':
+          description: Precio calculado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricingResult'
+
+  /pricing/best-offer:
+    post:
+      tags: [Pricing]
+      summary: Obtener mejor oferta para un producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_id:
+                  type: string
+                  format: uuid
+                variant_id:
+                  type: string
+                  format: uuid
+                destination:
+                  $ref: '#/components/schemas/Address'
+              required:
+                - product_id
+                - destination
+      responses:
+        '200':
+          description: Mejor oferta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BestOffer'
+
+  /pricing/history/{product_id}:
+    get:
+      tags: [Pricing]
+      summary: Historial de precios de un producto
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: Historial de precios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceHistory'
+
+  /checkout:
+    post:
+      tags: [Checkout]
+      summary: Iniciar proceso de checkout
+      description: |
+        Valida stock, precios y crea la orden pendiente de pago.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '200':
+          description: Checkout iniciado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Conflicto (precio cambió, sin stock)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutConflict'
+
+  /checkout/{checkout_token}/confirm:
+    post:
+      tags: [Checkout]
+      summary: Confirmar checkout con pago
+      parameters:
+        - name: checkout_token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Pago procesado, orden creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderConfirmation'
+        '402':
+          description: Pago fallido
+        '409':
+          description: Orden ya procesada (idempotency)
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: Listar órdenes del usuario
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, confirmed, processing, shipped, delivered, cancelled]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de órdenes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Obtener orden por ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Orden encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancelar orden
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Orden cancelada
+        '400':
+          description: No se puede cancelar (ya enviada)
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{id}/tracking:
+    get:
+      tags: [Orders]
+      summary: Obtener tracking de una orden
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Información de tracking
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackingInfo'
+
+  /suppliers:
+    get:
+      tags: [Suppliers]
+      summary: Listar proveedores activos
+      responses:
+        '200':
+          description: Lista de proveedores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Supplier'
+
+  /suppliers/{id}/health:
+    get:
+      tags: [Suppliers]
+      summary: Estado de salud de un proveedor
+      parameters:
+        - $ref: '#/components/parameters/SupplierId'
+      responses:
+        '200':
+          description: Estado de salud
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierHealth'
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Obtener perfil del usuario actual
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/register:
+    post:
+      tags: [Users]
+      summary: Registrar nuevo usuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Usuario registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '409':
+          description: Email ya registrado
+
+  /auth/login:
+    post:
+      tags: [Users]
+      summary: Iniciar sesión
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas
+
+  /admin/products:
+    get:
+      tags: [Admin]
+      summary: Listar todos los productos (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de productos
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/products/{id}/matches:
+    get:
+      tags: [Admin]
+      summary: Ver matches de un producto (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Matches del producto
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/suppliers:
+    get:
+      tags: [Admin]
+      summary: Listar proveedores (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de proveedores
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/suppliers/{id}/toggle:
+    post:
+      tags: [Admin]
+      summary: Activar/desactivar proveedor (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SupplierId'
+      responses:
+        '200':
+          description: Proveedor actualizado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: Listar todas las órdenes (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Lista de órdenes
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/pricing-rules:
+    get:
+      tags: [Admin]
+      summary: Listar reglas de pricing (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de reglas
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/pricing-rules:
+    post:
+      tags: [Admin]
+      summary: Crear regla de pricing (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PricingRule'
+      responses:
+        '201':
+          description: Regla creada
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Métricas del dashboard (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Métricas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMetrics'
+
+components:
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID del producto
+
+    OrderId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID de la orden
+
+    SupplierId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID del proveedor
+
+  schemas:
+    # Request/Response schemas
+    IdentifyProductRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: URL del producto
+        image_url:
+          type: string
+          format: uri
+          description: URL de imagen del producto
+        text:
+          type: string
+          description: Búsqueda textual
+      oneOf:
+        - required: [url]
+        - required: [image_url]
+        - required: [text]
+
+    IdentifiedProduct:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        canonical_name:
+          type: string
+        description:
+          type: string
+        brand:
+          type: string
+        category:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+        source:
+          type: string
+          description: Fuente de donde se identificó
+        source_url:
+          type: string
+          format: uri
+        source_price:
+          $ref: '#/components/schemas/Money'
+        attributes:
+          type: object
+          additionalProperties: true
+        match_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        canonical_name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        brand:
+          $ref: '#/components/schemas/Brand'
+        category:
+          type: string
+        gtin:
+          type: string
+        mpn:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVariant'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImage'
+        best_offer:
+          $ref: '#/components/schemas/BestOffer'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProductVariant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        price:
+          $ref: '#/components/schemas/Money'
+        in_stock:
+          type: boolean
+
+    ProductImage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        alt_text:
+          type: string
+        position:
+          type: integer
+        is_primary:
+          type: boolean
+
+    Brand:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+
+    Money:
+      type: object
+      properties:
+        amount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+          example: MXN
+
+    Address:
+      type: object
+      properties:
+        street:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+          default: MX
+
+    SearchResults:
+      type: object
+      properties:
+        query:
+          type: string
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+
+    MatchingCandidates:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchCandidate'
+
+    MatchCandidate:
+      type: object
+      properties:
+        supplier_product_id:
+          type: string
+          format: uuid
+        supplier:
+          $ref: '#/components/schemas/Supplier'
+        match_type:
+          type: string
+          enum: [exact, variant, equivalent, similar]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        price:
+          $ref: '#/components/schemas/Money'
+        shipping_cost:
+          $ref: '#/components/schemas/Money'
+        total_cost:
+          $ref: '#/components/schemas/Money'
+        in_stock:
+          type: boolean
+        delivery_days:
+          type: integer
+
+    MatchResult:
+      type: object
+      properties:
+        is_match:
+          type: boolean
+        match_type:
+          type: string
+          enum: [exact, variant, equivalent, similar, unknown]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        factors:
+          type: object
+          properties:
+            text_similarity:
+              type: number
+            image_similarity:
+              type: number
+            attribute_similarity:
+              type: number
+            brand_match:
+              type: boolean
+            gtin_match:
+              type: boolean
+
+    PricingRequest:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        supplier_product_id:
+          type: string
+          format: uuid
+        destination:
+          $ref: '#/components/schemas/Address'
+        strategy:
+          type: string
+          enum: [auto, competitor_minus_1, competitor_percent, minimum_margin, match_competitor, dynamic]
+          default: auto
+      required:
+        - product_id
+        - destination
+
+    PricingResult:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        supplier_cost:
+          $ref: '#/components/schemas/Money'
+        shipping_cost:
+          $ref: '#/components/schemas/Money'
+        tax_amount:
+          $ref: '#/components/schemas/Money'
+        total_cost:
+          $ref: '#/components/schemas/Money'
+        our_price:
+          $ref: '#/components/schemas/Money'
+        margin:
+          $ref: '#/components/schemas/Money'
+        margin_percentage:
+          type: number
+        strategy_used:
+          type: string
+        competitor_price:
+          $ref: '#/components/schemas/Money'
+        savings_vs_competitor:
+          $ref: '#/components/schemas/Money'
+        explanation:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            source:
+              type: string
+            supplier:
+              type: string
+            product_price:
+              type: number
+            shipping:
+              type: number
+            tax:
+              type: number
+            fees:
+              type: number
+            exchange_rate:
+              type: number
+            final_cost:
+              type: number
+            competitor_price:
+              type: number
+            our_price:
+              type: number
+            pricing_rule:
+              type: string
+            algorithm_version:
+              type: string
+
+    BestOffer:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        offer_score:
+          type: number
+        price_score:
+          type: number
+        delivery_score:
+          type: number
+        reliability_score:
+          type: number
+        match_confidence:
+          type: number
+        supplier:
+          $ref: '#/components/schemas/Supplier'
+        our_price:
+          $ref: '#/components/schemas/Money'
+        original_price:
+          $ref: '#/components/schemas/Money'
+        savings:
+          $ref: '#/components/schemas/Money'
+        savings_percentage:
+          type: number
+        shipping_cost:
+          $ref: '#/components/schemas/Money'
+        total_landed_cost:
+          $ref: '#/components/schemas/Money'
+        delivery_days:
+          type: integer
+        in_stock:
+          type: boolean
+
+    PriceHistory:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        period:
+          type: string
+        data_points:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              min_price:
+                $ref: '#/components/schemas/Money'
+              max_price:
+                $ref: '#/components/schemas/Money'
+              avg_price:
+                $ref: '#/components/schemas/Money'
+              suppliers_count:
+                type: integer
+
+    CheckoutRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckoutItem'
+          minItems: 1
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        create_account:
+          type: boolean
+          default: false
+        coupon_code:
+          type: string
+      required:
+        - items
+        - shipping_address
+        - email
+
+    CheckoutItem:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        supplier_product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 10
+      required:
+        - product_id
+        - variant_id
+        - supplier_product_id
+        - quantity
+
+    CheckoutResponse:
+      type: object
+      properties:
+        checkout_token:
+          type: string
+          description: Token idempotente para este checkout
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckoutItemSummary'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        shipping:
+          $ref: '#/components/schemas/Money'
+        tax:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+        payment_methods:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [card, oxxo, spei]
+              name:
+                type: string
+        expires_at:
+          type: string
+          format: date-time
+          description: Checkout expira en 15 minutos
+
+    CheckoutItemSummary:
+      type: object
+      properties:
+        product_name:
+          type: string
+        variant_name:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        total_price:
+          $ref: '#/components/schemas/Money'
+
+    CheckoutConflict:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [price_changed, out_of_stock, supplier_unavailable]
+        message:
+          type: string
+        item_index:
+          type: integer
+        old_price:
+          $ref: '#/components/schemas/Money'
+        new_price:
+          $ref: '#/components/schemas/Money'
+
+    PaymentRequest:
+      type: object
+      properties:
+        payment_method:
+          type: string
+          enum: [card, oxxo, spei]
+        card_token:
+          type: string
+          description: Token de tarjeta (no datos sensibles)
+        billing_address:
+          $ref: '#/components/schemas/Address'
+      required:
+        - payment_method
+
+    OrderConfirmation:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [confirmed, processing]
+        total:
+          $ref: '#/components/schemas/Money'
+        estimated_delivery:
+          type: string
+          format: date-time
+        tracking_url:
+          type: string
+          format: uri
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, confirmed, processing, shipped, delivered, cancelled]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        shipping:
+          $ref: '#/components/schemas/Money'
+        tax:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        payment_method:
+          type: string
+        tracking:
+          $ref: '#/components/schemas/TrackingInfo'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_name:
+          type: string
+        variant_name:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        total_price:
+          $ref: '#/components/schemas/Money'
+        supplier:
+          type: string
+        status:
+          type: string
+
+    OrderList:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+
+    TrackingInfo:
+      type: object
+      properties:
+        carrier:
+          type: string
+        service:
+          type: string
+        tracking_number:
+          type: string
+        status:
+          type: string
+        estimated_delivery:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              location:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+              description:
+                type: string
+
+    Supplier:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [api, feed, scraping, direct]
+        is_active:
+          type: boolean
+        reliability_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        products_count:
+          type: integer
+
+    SupplierHealth:
+      type: object
+      properties:
+        supplier_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [healthy, degraded, down]
+        success_rate_24h:
+          type: number
+        avg_response_time_ms:
+          type: integer
+        last_check:
+          type: string
+          format: date-time
+        issues:
+          type: array
+          items:
+            type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        phone:
+          type: string
+        addresses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Address'
+        created_at:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        name:
+          type: string
+        phone:
+          type: string
+      required:
+        - email
+        - password
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Token expiration in seconds
+        user:
+          $ref: '#/components/schemas/User'
+
+    PricingRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [percentage, fixed, dynamic]
+        config:
+          type: object
+          properties:
+            discount_percentage:
+              type: number
+            fixed_amount:
+              type: number
+            min_margin:
+              type: number
+        priority:
+          type: integer
+        is_active:
+          type: boolean
+
+    DashboardMetrics:
+      type: object
+      properties:
+        orders_today:
+          type: integer
+        revenue_today:
+          $ref: '#/components/schemas/Money'
+        average_margin:
+          type: number
+        best_offer_rate:
+          type: number
+        active_suppliers:
+          type: integer
+        pending_orders:
+          type: integer
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              message:
+                type: string
+              severity:
+                type: string
+                enum: [info, warning, critical]
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: No autenticado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: No autorizado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    UnprocessableEntity:
+      description: Entidad no procesable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT del login

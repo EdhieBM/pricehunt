@@ -1,0 +1,1362 @@
+MASTER PROMPT — PLANIFICACIÓN COMPLETA DE UNA PLATAFORMA DE COMERCIO ALGORÍTMICO
+CONTEXTO DEL PROYECTO
+Estamos diseñando una plataforma de ecommerce radicalmente enfocada en conseguir para el usuario la mejor oferta posible.
+La plataforma NO debe plantearse inicialmente como:
+	•	un marketplace tradicional;
+	•	un simple comparador de precios;
+	•	otra tienda online;
+	•	una alternativa a TikTok Shop;
+	•	una alternativa a Amazon, Temu, AliExpress o Alibaba.
+La idea es construir una capa de comercio algorítmica que pueda recibir un producto descubierto por el usuario —por ejemplo desde TikTok— identificarlo, encontrar ese producto o equivalentes válidos entre múltiples fuentes, calcular el precio final real, y permitir que el usuario lo compre desde nuestra propia interfaz.
+Para el usuario debe sentirse como una tienda normal:
+Producto → precio → comprar → checkout → pedido → entrega.
+Pero detrás de escena, nuestro sistema debe decidir dinámicamente cuál es la mejor manera de conseguir y cumplir ese pedido.
+Puede haber múltiples fuentes:
+	•	AliExpress
+	•	Alibaba
+	•	Temu
+	•	Amazon
+	•	Mercado Libre
+	•	tiendas independientes
+	•	proveedores directos
+	•	distribuidores
+	•	feeds de productos
+	•	APIs oficiales
+	•	programas de afiliados
+	•	proveedores con acuerdos directos
+	•	futuras fuentes adicionales
+No asumamos que todas estas fuentes permitirán integración directa. Debemos investigar técnicamente, legalmente y comercialmente qué mecanismos son posibles para cada fuente.
+
+
+⸻
+
+
+PRINCIPIO FUNDAMENTAL DEL PROYECTO
+La prioridad número 1 de toda la arquitectura es:
+MINIMIZAR EL PRECIO FINAL PARA EL CLIENTE.
+No maximizar margen.
+No maximizar markup.
+No maximizar revenue por pedido.
+No intentar ganar una cantidad fija por producto.
+La filosofía es:
+Ser la mejor oferta posible.
+Ejemplo:
+TikTok: $108 MXN
+Proveedor A: $105
+Proveedor B: $103
+Proveedor C: $101
+Nuestra plataforma podría vender a:
+$102 MXN
+Margen: $1 MXN.
+Eso es perfectamente aceptable si permite que el usuario tenga la mejor oferta.
+Incluso puede haber productos con:
+$0 de margen
+si estratégicamente tiene sentido.
+En determinados casos podría incluso analizarse operar con margen negativo controlado como estrategia de adquisición, pero esto debe ser una decisión explícita y limitada, nunca accidental.
+El sistema debe tratar el margen como una restricción/variable secundaria, no como el objetivo principal.
+
+
+⸻
+
+
+SEGUNDO PRINCIPIO
+El precio que importa es el:
+PRECIO FINAL REAL
+No solamente el precio del producto.
+Debemos considerar, cuando sea posible:
+	•	precio del producto;
+	•	variante;
+	•	cantidad;
+	•	envío;
+	•	impuestos;
+	•	aranceles;
+	•	descuentos;
+	•	cupones disponibles;
+	•	promociones;
+	•	costo de fulfillment;
+	•	costo de pago;
+	•	costos adicionales;
+	•	destino;
+	•	código postal;
+	•	tiempo de entrega;
+	•	disponibilidad;
+	•	riesgo de cancelación;
+	•	devoluciones;
+	•	diferencias de producto.
+La comparación debe intentar ser:
+Producto comparable + condiciones comparables + costo total comparable.
+
+
+⸻
+
+
+TERCER PRINCIPIO
+Nunca asumir que dos productos son iguales solamente porque tienen títulos parecidos.
+Necesitamos un sistema robusto de:
+PRODUCT MATCHING
+Debe poder analizar:
+	•	título;
+	•	descripción;
+	•	imágenes;
+	•	marca;
+	•	modelo;
+	•	SKU;
+	•	UPC/EAN/GTIN cuando exista;
+	•	atributos;
+	•	color;
+	•	talla;
+	•	capacidad;
+	•	dimensiones;
+	•	materiales;
+	•	especificaciones;
+	•	variantes;
+	•	contenido del paquete;
+	•	vendedor;
+	•	fabricante;
+	•	categoría.
+Debe distinguir entre:
+Exact Match
+Es esencialmente el mismo producto.
+Variant Match
+Es el mismo producto pero una variante diferente.
+Equivalent
+No es idéntico, pero puede considerarse una alternativa funcional.
+Similar
+Se parece, pero no debería presentarse como el mismo producto.
+Unknown
+No hay suficiente confianza.
+No permitir que un producto similar se presente fraudulentamente como idéntico.
+
+
+⸻
+
+
+CUARTO PRINCIPIO
+El usuario debe poder descubrir productos desde cualquier lugar.
+El MVP debe considerar:
+	1.	URL del producto.
+	2.	URL de TikTok.
+	3.	Imagen/screenshot.
+	4.	Búsqueda textual.
+	5.	Eventualmente navegador/extensión/app.
+Ejemplo principal:
+Usuario está viendo TikTok.
+Ve un producto.
+Copia el enlace.
+Lo pega en nuestra plataforma.
+Nuestra plataforma:
+	1.	identifica el producto;
+	2.	extrae información;
+	3.	encuentra candidatos;
+	4.	realiza matching;
+	5.	consulta precios;
+	6.	calcula precio final;
+	7.	encuentra la mejor fuente;
+	8.	muestra nuestro producto;
+	9.	permite comprar.
+
+
+⸻
+
+
+QUINTO PRINCIPIO
+Para el usuario debemos ocultar la complejidad interna.
+El usuario debería ver:
+Producto X
+$106 MXN
+Envío incluido
+Entrega estimada X días
+Comprar
+No debería necesitar saber:
+“Este pedido salió de proveedor A porque su costo era $98.37, pero ayer era proveedor B.”
+Sin embargo, internamente debemos registrar absolutamente todo para auditoría, debugging, pricing y análisis.
+
+
+⸻
+
+
+OBJETIVO DE ESTA TAREA
+NO QUIERO QUE PROGRAMÉS TODAVÍA.
+Quiero una:
+PLANIFICACIÓN TÉCNICA Y DE NEGOCIO EXTREMADAMENTE PROFUNDA
+Antes de escribir código debemos diseñar correctamente la infraestructura.
+Quiero que pienses como:
+	•	CTO;
+	•	arquitecto de sistemas distribuidos;
+	•	ingeniero de ecommerce;
+	•	ingeniero de búsqueda;
+	•	ingeniero de pricing;
+	•	ingeniero de data;
+	•	experto en scraping/API integrations;
+	•	experto en infraestructura;
+	•	experto en seguridad;
+	•	experto en pagos;
+	•	experto en fulfillment;
+	•	experto en observabilidad;
+	•	experto en escalabilidad.
+No quiero una lista genérica de tecnologías.
+Quiero decisiones justificadas.
+
+
+⸻
+
+
+PARTE 1 — DEFINIR EXACTAMENTE EL PRODUCTO
+Define:
+	•	propuesta de valor;
+	•	usuario objetivo;
+	•	flujo principal;
+	•	flujo alternativo;
+	•	MVP;
+	•	versión 2;
+	•	versión 3;
+	•	qué NO debemos construir inicialmente;
+	•	qué debe quedar preparado desde el principio.
+Diseña el flujo:
+TikTok / Internet
+        ↓
+URL / imagen / búsqueda
+        ↓
+Product Identification
+        ↓
+Product Matching
+        ↓
+Candidate Discovery
+        ↓
+Price Collection
+        ↓
+Price Normalization
+        ↓
+Shipping Calculation
+        ↓
+Tax / Fee Calculation
+        ↓
+Final Landed Cost
+        ↓
+Supplier Ranking
+        ↓
+Our Pricing Engine
+        ↓
+Our Product Page
+        ↓
+Checkout
+        ↓
+Order Routing
+        ↓
+Supplier Purchase
+        ↓
+Fulfillment
+        ↓
+Tracking
+        ↓
+Customer
+Identifica todos los puntos débiles.
+
+
+⸻
+
+
+PARTE 2 — ARQUITECTURA GENERAL
+Diseña la arquitectura completa.
+Determina si debemos comenzar con:
+	•	monolito modular;
+	•	microservicios;
+	•	modular monolith + workers;
+	•	event-driven architecture;
+	•	combinación de estos.
+No elijas microservicios simplemente porque suenan escalables.
+Quiero que expliques qué arquitectura es adecuada para:
+MVP
+10,000 usuarios
+100,000 usuarios
+1 millón de usuarios
+10 millones de usuarios
+
+
+⸻
+
+
+PARTE 3 — COMPONENTES DEL SISTEMA
+Lista absolutamente todos los componentes necesarios.
+Por ejemplo:
+	•	frontend;
+	•	backend;
+	•	API;
+	•	product ingestion;
+	•	crawler system;
+	•	supplier integrations;
+	•	search engine;
+	•	product matching;
+	•	image processing;
+	•	AI/ML layer;
+	•	pricing engine;
+	•	shipping engine;
+	•	tax engine;
+	•	inventory engine;
+	•	checkout;
+	•	payments;
+	•	orders;
+	•	fulfillment;
+	•	tracking;
+	•	notifications;
+	•	customer accounts;
+	•	admin panel;
+	•	analytics;
+	•	monitoring;
+	•	logging;
+	•	queues;
+	•	cache;
+	•	databases;
+	•	object storage;
+	•	CDN;
+	•	secrets management;
+	•	fraud detection;
+	•	rate limiting;
+	•	backups;
+	•	disaster recovery.
+Pero NO te limites a esta lista.
+Busca componentes que estoy olvidando.
+
+
+⸻
+
+
+PARTE 4 — DATABASE DESIGN
+Diseña el modelo de datos.
+Necesitamos como mínimo analizar entidades como:
+	•	users;
+	•	products;
+	•	product_variants;
+	•	product_images;
+	•	product_attributes;
+	•	brands;
+	•	suppliers;
+	•	supplier_products;
+	•	supplier_variants;
+	•	offers;
+	•	prices;
+	•	shipping_options;
+	•	taxes;
+	•	inventory;
+	•	product_matches;
+	•	match_scores;
+	•	price_snapshots;
+	•	orders;
+	•	order_items;
+	•	supplier_orders;
+	•	payments;
+	•	refunds;
+	•	shipments;
+	•	tracking_events;
+	•	pricing_rules;
+	•	commissions;
+	•	margins;
+	•	audit_logs.
+Diseña:
+	•	PostgreSQL schema conceptual;
+	•	índices;
+	•	claves;
+	•	relaciones;
+	•	particionamiento si aplica;
+	•	datos históricos;
+	•	TTL;
+	•	datos que deben almacenarse;
+	•	datos que NO deben almacenarse.
+
+
+⸻
+
+
+PARTE 5 — PRODUCT INGESTION
+Necesitamos construir una infraestructura que pueda incorporar productos desde múltiples fuentes.
+Analiza:
+APIs oficiales
+feeds
+afiliados
+scraping
+crawling
+proveedores directos
+importación manual
+webhooks
+Para cada mecanismo analiza:
+	•	dificultad;
+	•	estabilidad;
+	•	costo;
+	•	legalidad/ToS;
+	•	escalabilidad;
+	•	rate limits;
+	•	mantenimiento;
+	•	calidad de datos.
+NO asumas que podemos scrapear cualquier sitio.
+Quiero una estrategia de fuentes:
+Tier 1 — Integraciones oficiales
+Tier 2 — Feeds/afiliados
+Tier 3 — acuerdos con proveedores
+Tier 4 — mecanismos permitidos de crawling
+Tier 5 — fuentes experimentales
+
+
+⸻
+
+
+PARTE 6 — PRODUCT MATCHING ENGINE
+Este es uno de los componentes más importantes del proyecto.
+Diseña un sistema híbrido:
+deterministic matching
+	•	GTIN;
+	•	SKU;
+	•	MPN;
+	•	brand + model;
+	•	códigos;
+	•	URLs;
+	•	identificadores.
+text matching
+	•	embeddings;
+	•	TF-IDF/BM25;
+	•	semantic similarity.
+image matching
+	•	embeddings visuales;
+	•	perceptual hashing;
+	•	CLIP o equivalente;
+	•	image similarity.
+multimodal matching
+Combinar:
+	•	texto;
+	•	imagen;
+	•	atributos;
+	•	marca;
+	•	modelo;
+	•	categoría.
+Diseña un score de confianza.
+Por ejemplo:
+0.98+ = exact match
+0.90–0.98 = high confidence
+0.75–0.90 = review/conditional
+<0.75 = no match
+Pero NO asumas esos números como definitivos.
+Propón cómo deberíamos calibrarlos con datos reales.
+
+
+⸻
+
+
+PARTE 7 — PRICE ENGINE
+Diseña el corazón del sistema.
+Necesitamos determinar:
+Final Supplier Cost =
+Product Cost
++ Shipping
++ Taxes
++ Duties
++ Payment Fees
++ Fulfillment Costs
++ Expected Failure Cost
+Después:
+Our Customer Price
+=
+minimum viable price
+subject to:
+- being competitive
+- not losing unacceptable money
+- satisfying business constraints
+Quiero varias estrategias:
+Strategy A
+Ser $1 más barato.
+Strategy B
+Ser un porcentaje más barato.
+Strategy C
+Precio mínimo con margen mínimo.
+Strategy D
+Precio igual al mejor precio cuando no podemos mejorar.
+Strategy E
+Precio dinámico basado en competencia.
+Strategy F
+Precio con margen negativo controlado.
+Explica cuándo usar cada estrategia.
+
+
+⸻
+
+
+PARTE 8 — “BEST OFFER” ENGINE
+Define matemáticamente qué significa:
+BEST OFFER
+No necesariamente es simplemente:
+min(price)
+Puede depender de:
+	•	precio;
+	•	shipping;
+	•	delivery time;
+	•	seller reliability;
+	•	stock;
+	•	returns;
+	•	taxes;
+	•	authenticity;
+	•	product match confidence.
+Diseña un ranking.
+Por ejemplo:
+Offer Score =
+Price Score
++ Delivery Score
++ Reliability Score
++ Match Confidence
++ Return Score
+Pero analiza si debemos usar un score compuesto o reglas duras.
+La prioridad debe seguir siendo:
+MINIMIZAR PRECIO FINAL
+No permitir que una oferta $30 más cara gane solamente porque entrega un día antes, salvo que el usuario lo solicite o exista una regla explícita.
+
+
+⸻
+
+
+PARTE 9 — REAL-TIME PRICING
+Los precios cambian.
+Diseña:
+	•	cache;
+	•	TTL;
+	•	price snapshots;
+	•	refresh;
+	•	stale data;
+	•	price verification;
+	•	race conditions;
+	•	stock changes;
+	•	price changes entre checkout y supplier purchase.
+Pregunta crítica:
+¿Qué sucede si:
+Nuestro precio mostrado = $102
+        ↓
+cliente compra
+        ↓
+proveedor cambia a $109
+Diseña el sistema de protección.
+
+
+⸻
+
+
+PARTE 10 — CHECKOUT
+Diseña checkout completo.
+Analiza:
+	•	guest checkout;
+	•	cuentas;
+	•	dirección;
+	•	CP;
+	•	cálculo de envío;
+	•	impuestos;
+	•	pagos;
+	•	confirmación;
+	•	idempotency;
+	•	payment authorization;
+	•	captura;
+	•	refunds;
+	•	cancellations.
+Investiga qué proveedor(es) de pagos son apropiados para México y eventualmente LATAM.
+No elegir únicamente por popularidad.
+Compara:
+	•	Stripe;
+	•	Mercado Pago;
+	•	Conekta;
+	•	OpenPay;
+	•	otros relevantes.
+
+
+⸻
+
+
+PARTE 11 — ORDER ROUTING
+Este componente es crítico.
+Después de que el cliente paga:
+Order
+ ↓
+Supplier Selection
+ ↓
+Purchase
+ ↓
+Confirmation
+ ↓
+Tracking
+Pero el supplier selection debe considerar:
+	•	precio;
+	•	stock;
+	•	envío;
+	•	tiempo;
+	•	confiabilidad;
+	•	historial;
+	•	tasa de cancelación;
+	•	devoluciones;
+	•	riesgo.
+Diseña fallback:
+Supplier A falla
+      ↓
+Supplier B
+      ↓
+Supplier C
+Determina en qué momento se debe comprar al proveedor y cuándo cancelar/reembolsar.
+
+
+⸻
+
+
+PARTE 12 — INVENTORY
+No queremos necesariamente mantener inventario.
+Diseña:
+	•	virtual inventory;
+	•	supplier inventory;
+	•	cached inventory;
+	•	inventory confidence;
+	•	reservation;
+	•	overselling prevention.
+
+
+⸻
+
+
+PARTE 13 — SHIPPING
+Diseña un Shipping Engine.
+Debe poder calcular:
+product
++
+origin
++
+destination
++
+weight
++
+dimensions
++
+carrier
++
+service
+=
+landed shipping cost
+Analiza proveedores/carriers apropiados para México.
+Considera:
+	•	Correos;
+	•	Estafeta;
+	•	DHL;
+	•	FedEx;
+	•	UPS;
+	•	99minutos;
+	•	otros.
+No asumir integraciones disponibles sin investigarlas.
+
+
+⸻
+
+
+PARTE 14 — TAXES / IMPORTS
+Diseña cómo manejar:
+	•	IVA;
+	•	importaciones;
+	•	aranceles;
+	•	DDP;
+	•	DDU;
+	•	impuestos del marketplace;
+	•	impuestos incluidos;
+	•	costos inesperados.
+El precio mostrado debe intentar representar el:
+TOTAL LANDED COST
+No engañar al usuario con:
+“$49”
+si realmente termina pagando:
+“$49 + $130 shipping + impuestos”.
+
+
+⸻
+
+
+PARTE 15 — INFRASTRUCTURE
+Quiero un análisis de infraestructura extremadamente concreto.
+Compara:
+VPS tradicionales
+	•	Hetzner
+	•	OVH
+	•	DigitalOcean
+	•	Vultr
+	•	Linode/Akamai
+Cloud
+	•	AWS
+	•	Google Cloud
+	•	Azure
+	•	Cloudflare
+Managed services
+Determina qué debemos usar para:
+	•	frontend;
+	•	backend;
+	•	PostgreSQL;
+	•	Redis;
+	•	queues;
+	•	workers;
+	•	object storage;
+	•	CDN;
+	•	search;
+	•	monitoring;
+	•	logs;
+	•	backups.
+Quiero una arquitectura inicial que tenga:
+excelente relación costo/calidad
+sin sobreingeniería.
+Pero debe poder escalar.
+
+
+⸻
+
+
+PARTE 16 — VPS / SERVERS
+Propón una topología inicial concreta.
+Ejemplo conceptual:
+Cloudflare
+     ↓
+Load Balancer
+     ↓
+App Server
+     ↓
+PostgreSQL
+     ↓
+Redis
+     ↓
+Workers
+     ↓
+Crawler/Integration Workers
+Pero no asumas esta arquitectura.
+Diseña la correcta.
+Especifica:
+	•	CPU;
+	•	RAM;
+	•	storage;
+	•	bandwidth;
+	•	cantidad de servidores;
+	•	regiones;
+	•	backups;
+	•	failover.
+Para:
+MVP
+producción temprana
+100k usuarios
+1M usuarios
+
+
+⸻
+
+
+PARTE 17 — SCRAPING / CRAWLING
+Si se utiliza crawling permitido:
+Diseña:
+	•	crawler scheduler;
+	•	queues;
+	•	concurrency;
+	•	rate limiting;
+	•	robots.txt;
+	•	domain policies;
+	•	retries;
+	•	proxy strategy;
+	•	fingerprinting solamente si es legal y apropiado;
+	•	change detection;
+	•	parser versioning;
+	•	monitoring;
+	•	anti-corruption layer.
+NO propongas evadir CAPTCHAs, controles de acceso, autenticación o restricciones de forma ilícita.
+La arquitectura debe favorecer integraciones autorizadas.
+
+
+⸻
+
+
+PARTE 18 — SEARCH
+Necesitamos búsqueda por:
+	•	texto;
+	•	URL;
+	•	imagen;
+	•	producto;
+	•	SKU;
+	•	marca;
+	•	categoría.
+Compara:
+	•	PostgreSQL full-text;
+	•	Meilisearch;
+	•	Typesense;
+	•	Elasticsearch/OpenSearch;
+	•	vector DB;
+	•	pgvector.
+No quiero agregar infraestructura innecesaria.
+Determina qué usar inicialmente y cuándo migrar.
+
+
+⸻
+
+
+PARTE 19 — AI
+Determina exactamente dónde AI aporta valor y dónde NO.
+Posibles usos:
+	•	extracción de atributos;
+	•	clasificación;
+	•	product matching;
+	•	image understanding;
+	•	OCR;
+	•	normalización;
+	•	generación de títulos;
+	•	detección de variantes;
+	•	detección de duplicados;
+	•	detección de fraude.
+NO utilizar LLMs donde reglas determinísticas sean mejores.
+Quiero un sistema híbrido:
+Rules
++
+Classical algorithms
++
+Embeddings
++
+ML
++
+LLM
+cada uno donde tenga sentido.
+
+
+⸻
+
+
+PARTE 20 — OBSERVABILITY
+Diseña:
+	•	logs;
+	•	metrics;
+	•	traces;
+	•	alerts;
+	•	dashboards;
+	•	error tracking;
+	•	supplier health;
+	•	price freshness;
+	•	matching accuracy;
+	•	checkout failures.
+Métricas importantes:
+BUSINESS
+	•	searches/day;
+	•	products identified;
+	•	matches;
+	•	conversion;
+	•	average savings;
+	•	best-offer rate;
+	•	average margin;
+	•	zero-margin orders;
+	•	negative-margin orders;
+	•	order success;
+	•	supplier failure;
+	•	refunds.
+TECHNICAL
+	•	API latency;
+	•	queue latency;
+	•	DB latency;
+	•	crawler success;
+	•	stale prices;
+	•	matching confidence;
+	•	cache hit rate.
+
+
+⸻
+
+
+PARTE 21 — SEGURIDAD
+Diseña seguridad desde el principio.
+Considera:
+	•	secrets;
+	•	API keys;
+	•	payment data;
+	•	PII;
+	•	encryption;
+	•	authentication;
+	•	authorization;
+	•	admin security;
+	•	rate limiting;
+	•	bot protection;
+	•	fraud;
+	•	webhook validation;
+	•	SSRF;
+	•	SQL injection;
+	•	XSS;
+	•	CSRF;
+	•	dependency security;
+	•	backups;
+	•	audit logs.
+No almacenar información de tarjetas si el payment provider permite tokenización.
+
+
+⸻
+
+
+PARTE 22 — ADMIN PANEL
+Diseña un panel interno desde donde podamos:
+	•	ver productos;
+	•	ver proveedores;
+	•	revisar matches;
+	•	revisar precios;
+	•	bloquear proveedores;
+	•	cambiar reglas;
+	•	ver órdenes;
+	•	ver errores;
+	•	ver scraping;
+	•	ver márgenes;
+	•	ver pérdidas;
+	•	ver productos virales;
+	•	revisar refunds;
+	•	cambiar pricing policies.
+Debe existir una forma de intervenir manualmente cuando el algoritmo se equivoque.
+
+
+⸻
+
+
+PARTE 23 — DATA / ANALYTICS
+Diseña data pipeline.
+Necesitamos saber:
+	•	qué productos busca la gente;
+	•	qué productos compran;
+	•	dónde encontramos mejores precios;
+	•	qué proveedores son mejores;
+	•	qué categorías tienen mayor margen;
+	•	qué productos generan pérdida;
+	•	dónde fallan los matches;
+	•	dónde fallan proveedores.
+Esto debe alimentar el algoritmo.
+
+
+⸻
+
+
+PARTE 24 — EXPERIMENTACIÓN
+Diseña A/B testing para:
+	•	precio;
+	•	UI;
+	•	savings messaging;
+	•	checkout;
+	•	shipping;
+	•	product matching;
+	•	ranking.
+Pero nunca permitir experimentos que violen la regla principal:
+NO engañar al usuario sobre el precio.
+
+
+⸻
+
+
+PARTE 25 — BUSINESS MODEL
+Analiza modelos:
+	1.	margen;
+	2.	afiliación;
+	3.	supplier commission;
+	4.	direct supplier deals;
+	5.	advertising;
+	6.	premium membership;
+	7.	sponsored products.
+Determina cuáles son compatibles con nuestra filosofía.
+Prioridad:
+confianza del usuario > monetización inmediata.
+
+
+⸻
+
+
+PARTE 26 — LEGAL / COMPLIANCE
+Identifica las cuestiones que debemos consultar con abogados/contadores antes del lanzamiento:
+	•	ecommerce;
+	•	consumidor;
+	•	facturación;
+	•	IVA;
+	•	importaciones;
+	•	propiedad intelectual;
+	•	uso de imágenes;
+	•	uso de catálogos;
+	•	scraping;
+	•	términos de servicio;
+	•	afiliación;
+	•	reventa;
+	•	privacidad;
+	•	protección de datos;
+	•	devoluciones;
+	•	chargebacks;
+	•	publicidad;
+	•	precios comparativos.
+No des asesoría legal definitiva.
+Identifica preguntas que deben validarse profesionalmente.
+
+
+⸻
+
+
+PARTE 27 — MÉTRICA PRINCIPAL
+Propón un North Star Metric.
+Debe estar alineado con:
+“SER LA MEJOR OFERTA”
+Quiero evaluar métricas como:
+Best Offer Rate
+Porcentaje de productos donde nuestro precio final es el menor precio verificable encontrado.
+Average Customer Savings
+Ahorro promedio frente a la alternativa de referencia.
+Price Advantage
+Diferencia porcentual frente a la mejor alternativa.
+Match Accuracy
+Porcentaje de matches correctos.
+Fulfillment Success
+Porcentaje de órdenes completadas correctamente.
+Contribution Margin
+Margen después de costos reales.
+Propón la combinación correcta.
+
+
+⸻
+
+
+PARTE 28 — FAILURE MODES
+Haz un análisis de todos los escenarios donde el modelo puede fallar.
+Por ejemplo:
+	•	precio desactualizado;
+	•	proveedor sin stock;
+	•	producto diferente;
+	•	shipping inesperado;
+	•	impuesto inesperado;
+	•	proveedor cancela;
+	•	precio cambia;
+	•	marketplace bloquea API;
+	•	proveedor desaparece;
+	•	fraude;
+	•	chargeback;
+	•	devolución;
+	•	producto defectuoso;
+	•	usuario intenta abusar;
+	•	discrepancia de moneda;
+	•	error de conversión;
+	•	error de variante;
+	•	proveedor tarda demasiado;
+	•	API caída.
+Para cada uno:
+	•	detección;
+	•	prevención;
+	•	fallback;
+	•	recuperación.
+
+
+⸻
+
+
+PARTE 29 — COSTOS
+Haz una estimación realista del costo mensual.
+Separar:
+MVP
+10k usuarios
+100k usuarios
+1M usuarios
+Considerar:
+	•	servers;
+	•	DB;
+	•	storage;
+	•	bandwidth;
+	•	proxies si son legalmente apropiados;
+	•	APIs;
+	•	AI;
+	•	OCR;
+	•	search;
+	•	email;
+	•	SMS;
+	•	payments;
+	•	monitoring;
+	•	backups.
+Distinguir:
+costos fijos
+costos variables
+
+
+⸻
+
+
+PARTE 30 — STACK TECNOLÓGICO
+Propón stack completo.
+Evaluar, como mínimo:
+Frontend
+	•	Next.js / React
+Backend
+	•	TypeScript / Node
+	•	Python
+	•	Go
+Database
+	•	PostgreSQL
+Cache
+	•	Redis
+Queue
+	•	BullMQ / RabbitMQ / Kafka / SQS u otros
+Search
+	•	PostgreSQL / Meilisearch / OpenSearch / Typesense
+AI
+	•	APIs externas
+	•	modelos open source
+Storage
+	•	S3 compatible
+CDN
+	•	Cloudflare
+Observability
+	•	Sentry
+	•	Grafana
+	•	Prometheus
+	•	OpenTelemetry
+No quiero una lista superficial.
+Quiero que selecciones.
+
+
+⸻
+
+
+PARTE 31 — DEVELOPMENT ENVIRONMENT
+Define:
+	•	monorepo;
+	•	package manager;
+	•	linting;
+	•	formatting;
+	•	testing;
+	•	CI/CD;
+	•	Docker;
+	•	Docker Compose;
+	•	migrations;
+	•	seed data;
+	•	local development;
+	•	staging;
+	•	production.
+
+
+⸻
+
+
+PARTE 32 — TESTING
+Diseña estrategia para:
+	•	unit tests;
+	•	integration tests;
+	•	E2E;
+	•	pricing tests;
+	•	product matching tests;
+	•	supplier mocks;
+	•	payment sandbox;
+	•	failure injection;
+	•	load testing.
+Especialmente:
+PRICE ENGINE TESTING
+No permitir que un cambio de código haga que accidentalmente vendamos productos por debajo de costo.
+
+
+⸻
+
+
+PARTE 33 — REPRODUCIBILIDAD DEL PRECIO
+Cada precio mostrado debe poder explicarse.
+Guardar:
+timestamp
+source
+supplier
+product
+variant
+product_price
+shipping
+tax
+fees
+exchange_rate
+final_cost
+competitor_price
+our_price
+pricing_rule
+algorithm_version
+Así podremos responder:
+¿Por qué el producto costaba $106 a las 14:32?
+Esto es fundamental.
+
+
+⸻
+
+
+PARTE 34 — VERSIONING
+Versionar:
+	•	pricing algorithms;
+	•	matching algorithms;
+	•	supplier adapters;
+	•	product normalization;
+	•	database migrations;
+	•	APIs;
+	•	ML models.
+Necesitamos poder hacer rollback.
+
+
+⸻
+
+
+PARTE 35 — ROADMAP
+Después de todo el análisis, crear:
+Phase 0 — Research
+Phase 1 — MVP
+Phase 2 — Production
+Phase 3 — Scale
+Phase 4 — Direct Suppliers
+Phase 5 — Intelligent Purchasing Network
+Para cada fase:
+	•	features;
+	•	infraestructura;
+	•	equipo necesario;
+	•	costo aproximado;
+	•	riesgos;
+	•	dependencias;
+	•	criterio de éxito.
+
+
+⸻
+
+
+PARTE 36 — MVP MÍNIMO
+Define el MVP más pequeño que realmente pueda validar la idea.
+Debe permitir:
+Usuario
+ ↓
+pega URL
+ ↓
+producto identificado
+ ↓
+buscar ofertas
+ ↓
+mostrar mejor oferta
+ ↓
+precio propio
+ ↓
+checkout
+ ↓
+orden
+No quiero que el MVP sea una maqueta inútil.
+Debe validar el concepto comercial real.
+
+
+⸻
+
+
+PARTE 37 — MVP EXPERIMENTAL
+También diseña una versión incluso más pequeña para validar:
+¿Las personas realmente quieren pegar un producto de TikTok y comprarlo más barato en otra página?
+Debe ser posible construirla rápidamente.
+Pero debe compartir conceptos con la arquitectura final para no tirar todo después.
+
+
+⸻
+
+
+PARTE 38 — DECISION LOG
+Crea una tabla de decisiones:
+Decisión	Opciones	Elegida	Razón	Cuándo reconsiderar
+Incluye todas las decisiones importantes.
+
+
+⸻
+
+
+PARTE 39 — RIESGOS
+Crear matriz:
+Riesgo	Probabilidad	Impacto	Mitigación
+Priorizar los riesgos que pueden matar el negocio.
+No centrarse solamente en riesgos técnicos.
+
+
+⸻
+
+
+PARTE 40 — “WHAT ARE WE MISSING?”
+Esta sección es OBLIGATORIA.
+Después de diseñar todo, intenta destruir tu propio plan.
+Pregunta:
+¿Qué componente, riesgo, costo, dependencia, problema legal, problema técnico, problema de UX o problema comercial estamos olvidando?
+Busca deliberadamente puntos ciegos.
+
+
+⸻
+
+
+REGLAS IMPORTANTES PARA TU RESPUESTA
+	1.	NO empieces programando.
+	2.	NO generes archivos de código todavía.
+	3.	NO asumas que una API existe.
+	4.	NO asumas que podemos hacer scraping de cualquier sitio.
+	5.	NO asumas que podemos revender productos sin restricciones.
+	6.	NO maximices margen como objetivo principal.
+	7.	NO sacrifiques confiabilidad solamente por conseguir $1 menos.
+	8.	El objetivo es minimizar el precio final real.
+	9.	La experiencia del usuario debe sentirse como una tienda normal.
+	10.	La complejidad debe permanecer principalmente detrás del sistema.
+	11.	Prioriza soluciones simples en MVP.
+	12.	Diseña desde el principio para poder escalar.
+	13.	Diferencia claramente:
+
+
+	•	lo que sabemos;
+	•	lo que suponemos;
+	•	lo que necesitamos investigar.
+	14.	Si una decisión requiere información externa actualizada, indícalo.
+	15.	Si existen varias opciones, compáralas antes de elegir.
+	16.	No uses tecnología por moda.
+	17.	Cada componente debe justificar su existencia.
+	18.	Piensa en México como mercado inicial, pero deja preparada la arquitectura para LATAM.
+	19.	La plataforma debe ser capaz de operar con múltiples proveedores.
+	20.	Diseña pensando en que eventualmente podemos negociar directamente con fabricantes.
+
+
+⸻
+
+
+FORMATO DE ENTREGA
+Entrega el resultado en este orden:
+	1.	Executive Summary
+	2.	Definición exacta del producto
+	3.	Qué hace diferente al modelo
+	4.	Arquitectura conceptual
+	5.	Arquitectura técnica
+	6.	Componentes
+	7.	Data model
+	8.	Product ingestion
+	9.	Product matching
+	10.	Pricing engine
+	11.	Best Offer engine
+	12.	Checkout
+	13.	Order routing
+	14.	Fulfillment
+	15.	Infrastructure
+	16.	VPS/Cloud architecture
+	17.	Search
+	18.	AI/ML
+	19.	Security
+	20.	Observability
+	21.	Admin
+	22.	Analytics
+	23.	Legal/compliance questions
+	24.	Business model
+	25.	Cost estimates
+	26.	MVP
+	27.	Roadmap
+	28.	Decision log
+	29.	Risk matrix
+	30.	“What are we missing?”
+	31.	Recomendación final
+
+
+⸻
+
+
+CRITERIO FINAL
+Si tienes que elegir entre:
+A)
+ganar más dinero por pedido
+y
+B)
+ofrecer al usuario el precio final más bajo posible
+la arquitectura debe favorecer:
+B
+Siempre que sea económicamente sostenible y no comprometa la confiabilidad, cumplimiento, seguridad o calidad del servicio.
+Nuestro objetivo no es ser la tienda con mayor margen.
+Nuestro objetivo es convertirnos en:
+LA CAPA QUE EL USUARIO CONSULTA ANTES DE COMPRAR
+Porque sabe:
+“Si existe una forma legítima de conseguir esto más barato, probablemente este sistema la encuentre.”
+La calidad del producto debe medirse principalmente por nuestra capacidad de:
+IDENTIFICAR CORRECTAMENTE
+COMPARAR CORRECTAMENTE
+CALCULAR CORRECTAMENTE
+ENCONTRAR EL COSTO MÁS BAJO
+Y CUMPLIR LA ORDEN CORRECTAMENTE.
+No programes hasta terminar esta planificación y hasta identificar las decisiones que requieren confirmación humana.

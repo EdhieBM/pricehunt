@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pricehunt-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: pricehunt
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pricehunt-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: pricehunt-meilisearch
+    ports:
+      - '7700:7700'
+    environment:
+      MEILI_MASTER_KEY: 'dev-master-key'
+      MEILI_ENV: 'development'
+    volumes:
+      - meilisearch_data:/meili_data
+
+volumes:
+  postgres_data:
+  redis_data:
+  meilisearch_data:
