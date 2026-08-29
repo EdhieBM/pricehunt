@@ -41,7 +41,7 @@ describe('Matching Engine', () => {
       );
 
       expect(result.confidence).toBeGreaterThan(0.6);
-      expect(result.type).not.toBe('unknown');
+      expect(result.type).toBe('similar');
     });
 
     it('scores low for different products', () => {

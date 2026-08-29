@@ -23,7 +23,7 @@ const WEIGHTS = {
 const THRESHOLDS = {
   exact: 0.95,
   high: 0.85,
-  review: 0.70,
+  review: 0.60,
 } as const;
 
 function normalizeText(text: string): string {
