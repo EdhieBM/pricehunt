@@ -1,6 +1,7 @@
 import { db } from './client';
 import { brands, categories, suppliers, products, supplierProducts, currentPrices } from './schema';
 import { eq } from 'drizzle-orm';
+import { setupMeilisearch, indexProduct, type MeiliProduct } from './services/search';
 
 async function seed() {
   console.log('Seeding database...');
@@ -181,6 +182,52 @@ async function seed() {
     }
   }
   console.log(`Inserted ${testProducts.length} test products with prices`);
+
+  // Index in Meilisearch
+  try {
+    await setupMeilisearch();
+    const allSPs = await db
+      .select({
+        spId: supplierProducts.id,
+        title: products.canonicalName,
+        slug: products.slug,
+        brand: brands.name,
+        price: currentPrices.price,
+        currency: currentPrices.currency,
+        imageUrl: products.slug,
+        supplier: suppliers.slug,
+        inStock: currentPrices.inStock,
+      })
+      .from(supplierProducts)
+      .innerJoin(products, eq(supplierProducts.productId, products.id))
+      .innerJoin(suppliers, eq(supplierProducts.supplierId, suppliers.id))
+      .leftJoin(brands, eq(products.brandId, brands.id))
+      .innerJoin(currentPrices, eq(supplierProducts.id, currentPrices.supplierProductId));
+
+    const meiliProducts: MeiliProduct[] = allSPs.map((row) => ({
+      id: row.spId,
+      title: row.title,
+      description: null,
+      brand: row.brand,
+      category: null,
+      price: parseFloat(row.price),
+      currency: row.currency || 'MXN',
+      imageUrl: null,
+      supplier: row.supplier,
+      inStock: row.inStock ?? true,
+      matchConfidence: 1,
+      slug: row.slug,
+    }));
+
+    if (meiliProducts.length > 0) {
+      for (const mp of meiliProducts) {
+        await indexProduct(mp);
+      }
+      console.log(`Indexed ${meiliProducts.length} products in Meilisearch`);
+    }
+  } catch (err) {
+    console.warn('Meilisearch indexing skipped:', (err as Error).message);
+  }
 
   console.log('Seed complete!');
 }

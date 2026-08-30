@@ -5,8 +5,8 @@ let client: MeiliSearch | null = null;
 export function getMeiliClient(): MeiliSearch {
   if (!client) {
     client = new MeiliSearch({
-      host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
-      apiKey: process.env.MEILISEARCH_MASTER_KEY || 'dev-master-key',
+      host: process.env.MEILISEARCH_URL || process.env.MEILISEARCH_HOST || 'http://localhost:7700',
+      apiKey: process.env.MEILISEARCH_MASTER_KEY || process.env.MEILISEARCH_KEY || 'dev-master-key',
     });
   }
   return client;
